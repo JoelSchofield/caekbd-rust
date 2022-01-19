@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "preLaunchTask": "${defaultBuildTask}",
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "probe_rs Executable Test",
+            "programBinary": "C:/Users/Joel/Joelteon/rust/pinci-playground/target/thumbv6m-none-eabi/debug/pinci", //!MODIFY
+            "chip": "RP2040", //!MODIFY
+            //"connectUnderReset": true,
+            "flashingEnabled": true,
+            "resetAfterFlashing": true,
+            "haltAfterReset": true,
+        }
+    ]
+}
