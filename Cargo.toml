@@ -17,6 +17,9 @@ embedded-hal ="0.2.5"
 # rp2040-hal = { git = "https://github.com/rp-rs/rp-hal", rev = "53d9dbdf524a63ae78d06fd93e25de73aa005015", features = ["rt"] }
 # rp2040-boot2 = "0.2.0"
 rp-pico = "0.2.0"
+smart-leds = "0.3.0"
+smart-leds-trait = "0.2.1"
+nb = "1.0.0"
 
 #[profile.dev]
 #lto = true
