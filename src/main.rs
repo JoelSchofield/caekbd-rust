@@ -3,6 +3,8 @@
 
 use panic_halt as _;
 
+mod slow_matrix;
+
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
 
@@ -27,7 +29,8 @@ mod app {
     use keyberon::key_code;
     //use keyberon::key_code::KeyCode::*;
     use keyberon::layout::Layout;
-    use keyberon::matrix::{Matrix, PressedKeys};
+    use keyberon::matrix::PressedKeys;
+    use crate::slow_matrix::SlowMatrix;
     //use rp2040_hal as hal;
     use usb_device::class_prelude::*;
     //use usb_device::device::UsbDeviceState;
@@ -64,11 +67,11 @@ mod app {
     // Forking the repo and adding a small delay between switching rows would probably fix the issue too.
     pub static LAYERS: keyberon::layout::Layers = keyberon::layout::layout! {
         {
-            [   1 2 3 4 5 6 7 8 9 0 - = n BSpace Delete  Escape   ]
-            [ n Q W E R T Y U I O P '[' ']' '\\' PScreen Tab      ]
-            [ n A S D F G H J K L ; '\'' Enter n Up      CapsLock ]
-            [ n Z X C V B N M , . / n   RShift n Down    LShift   ]
-            [ LGui LAlt n n n Space n n n RAlt n n Application RCtrl n LCtrl ]
+            [Escape     1 2 3 4 5 6 7 8 9 0 - = n BSpace Delete  ]
+            [Tab      n Q W E R T Y U I O P '[' ']' '\\' PScreen ]
+            [CapsLock n A S D F G H J K L ; '\'' Enter n Up      ]
+            [LShift   n Z X C V B N M , . / n   RShift n Down    ]
+            [LCtrl LGui LAlt n n n Space n n n RAlt n n Application RCtrl n ]
         }
     };
 
@@ -85,7 +88,7 @@ mod app {
         #[lock_free]
         watchdog: hal::watchdog::Watchdog,
         #[lock_free]
-        matrix: Matrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS>,
+        matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS>,
         layout: Layout,
         #[lock_free]
         debouncer: Debouncer<PressedKeys<NUM_COLUMNS, NUM_ROWS>>
@@ -118,19 +121,13 @@ mod app {
             &mut resets,
         );
 
-/*
-# The Physical Pins
-#                       COL0       COL1       COL2       COL3       COL4       COL5       COL6       COL7       COL8        COL9        COL10       COL11       COL12       COL13       COL14       COL15
-keyboard_cols = [ board.GP0, board.GP1, board.GP2, board.GP3, board.GP6, board.GP7, board.GP8, board.GP9, board.GP10, board.GP11, board.GP12, board.GP14, board.GP15, board.GP16, board.GP17, board.GP18 ]
-#                       ROW0        ROW1        ROW2        ROW3        ROW4
-keyboard_rows = [ board.GP19, board.GP20, board.GP21, board.GP22, board.GP26 ]
-
-Keyboard_Layout = [ [ [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE, Keycode.FOUR, Keycode.FIVE, Keycode.SIX, Keycode.SEVEN, Keycode.EIGHT, Keycode.NINE, Keycode.ZERO, Keycode.MINUS, Keycode.EQUALS, None, Keycode.BACKSPACE, Keycode.DELETE ],
-                      [ Keycode.TAB, None, Keycode.Q, Keycode.W, Keycode.E, Keycode.R, Keycode.T, Keycode.Y, Keycode.U, Keycode.I, Keycode.O, Keycode.P, Keycode.LEFT_BRACKET, Keycode.RIGHT_BRACKET, Keycode.BACKSLASH, Keycode.PRINT_SCREEN ],
-                      [ Keycode.CAPS_LOCK , None, Keycode.A, Keycode.S, Keycode.D, Keycode.F, Keycode.G, Keycode.H, Keycode.J, Keycode.K, Keycode.L, Keycode.SEMICOLON, Keycode.QUOTE, Keycode.ENTER, None, Keycode.UP_ARROW ],
-                      [ Keycode.LEFT_SHIFT, None, Keycode.Z, Keycode.X, Keycode.C, Keycode.V, Keycode.B, Keycode.N, Keycode.M, Keycode.COMMA, Keycode.PERIOD, Keycode.FORWARD_SLASH, None, Keycode.RIGHT_SHIFT, None, Keycode.DOWN_ARROW ],
-                      [ Keycode.LEFT_CONTROL, Keycode.LEFT_GUI, Keycode.LEFT_ALT, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, function_key_layer_hold(2), None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ],
-*/
+        /*
+        # Physical Pins
+        #                       COL0       COL1       COL2       COL3       COL4       COL5       COL6       COL7       COL8        COL9        COL10       COL11       COL12       COL13       COL14       COL15
+        keyboard_cols = [ board.GP0, board.GP1, board.GP2, board.GP3, board.GP6, board.GP7, board.GP8, board.GP9, board.GP10, board.GP11, board.GP12, board.GP14, board.GP15, board.GP16, board.GP17, board.GP18 ]
+        #                       ROW0        ROW1        ROW2        ROW3        ROW4
+        keyboard_rows = [ board.GP19, board.GP20, board.GP21, board.GP22, board.GP26 ]
+        */
         let gpio_col0 = pins.gpio0;
         let gpio_col1 = pins.gpio1;
         let gpio_col2 = pins.gpio2;
@@ -159,9 +156,10 @@ Keyboard_Layout = [ [ [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE,
             cortex_m::asm::nop();
         }
 
-        let matrix: Matrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
-            Matrix::new(
+        let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
+            SlowMatrix::new(
                 [
+                    gpio_col0.into_pull_up_input().into(),
                     gpio_col1.into_pull_up_input().into(),
                     gpio_col2.into_pull_up_input().into(),
                     gpio_col3.into_pull_up_input().into(),
@@ -177,7 +175,6 @@ Keyboard_Layout = [ [ [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE,
                     gpio_col13.into_pull_up_input().into(),
                     gpio_col14.into_pull_up_input().into(),
                     gpio_col15.into_pull_up_input().into(),
-                    gpio_col0.into_pull_up_input().into(), // Switched as a workaround to scanning issue (see above)
                 ],
                 [
                     gpio_row0.into_push_pull_output().into(),
@@ -192,7 +189,7 @@ Keyboard_Layout = [ [ [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE,
 
         let layout = Layout::new(LAYERS);
         let debouncer: keyberon::debounce::Debouncer<keyberon::matrix::PressedKeys<NUM_COLUMNS, NUM_ROWS>> =
-            Debouncer::new(PressedKeys::default(), PressedKeys::default(), 15);
+            Debouncer::new(PressedKeys::default(), PressedKeys::default(), 10);
 
         let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
         let mut alarm = timer.alarm_0().unwrap();
