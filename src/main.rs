@@ -43,16 +43,32 @@ mod app {
     [ Keycode.CAPS_LOCK , None, Keycode.A, Keycode.S, Keycode.D, Keycode.F, Keycode.G, Keycode.H, Keycode.J, Keycode.K, Keycode.L, Keycode.SEMICOLON, Keycode.QUOTE, Keycode.ENTER, None, Keycode.UP_ARROW ],
     [ Keycode.LEFT_SHIFT, None, Keycode.Z, Keycode.X, Keycode.C, Keycode.V, Keycode.B, Keycode.N, Keycode.M, Keycode.COMMA, Keycode.PERIOD, Keycode.FORWARD_SLASH, None, Keycode.RIGHT_SHIFT, None, Keycode.DOWN_ARROW ],
     [ Keycode.LEFT_CONTROL, Keycode.LEFT_GUI, Keycode.LEFT_ALT, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, function_key_layer_hold(2), None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ] 
+    
+    [ [ Keycode.GRAVE_ACCENT, Keycode.F1, Keycode.F2, Keycode.F3, Keycode.F4, Keycode.F5, Keycode.F6, Keycode.F7, Keycode.F8, Keycode.F9, Keycode.F10, Keycode.F11, Keycode.F12, None, None, Keycode.HOME ],
+    [ macro1(), None, None, Keycode.UP_ARROW, None, None, None, None, None, None, None, None, None, None, None, Keycode.END ],
+    [ Keycode.KEYPAD_NUMLOCK, None, Keycode.LEFT_ARROW, Keycode.DOWN_ARROW, Keycode.RIGHT_ARROW, None, None, None, None, None, None, None, None, Keycode.INSERT, None, Keycode.PAGE_UP],
+    [ Keycode.LEFT_SHIFT, None, None, None, None, None, None, None, None, None, None, None, None, None, None, Keycode.PAGE_DOWN],
+    [ Keycode.LEFT_CONTROL, Keycode.SCROLL_LOCK, None, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, None, None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ],
+    
+    [ [ board_reload(), None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.SCAN_PREVIOUS_TRACK],
+    [ None, None, lighting_mode(-1), lighting_toggle_on_off(), lighting_mode(1), None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.SCAN_NEXT_TRACK],
+    [ None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.VOLUME_INCREMENT],
+    [ None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.VOLUME_DECREMENT],
+    [ None, None, None, None, None, None, ConsumerControlCode.PLAY_PAUSE, None, None, None, None, function_key_layer_hold(2), None, None, None, ConsumerControlCode.MUTE] ] ]
     */
 
     #[rustfmt::skip]
+    // Note first column is shifted to the end. This is due to some timing issue with keyberon and matrix.rs coupled,
+    // with some capacitance that is present on the first column, which was resulting in the following rows key being
+    // pressed everytime you pushed a key in the first column. i.e. pressing 'Escape' would also press 'Tab'.
+    // Forking the repo and adding a small delay between switching rows would probably fix the issue too.
     pub static LAYERS: keyberon::layout::Layers = keyberon::layout::layout! {
         {
-            [ Escape     1 2 3 4 5 6 7 8 9 0 - =  BSpace  Delete  ]
-            [ Tab      n Q W E R T Y U I O P '[' ']' '\\' PScreen ]
-            [ CapsLock n A S D F G H J K L ; '\'' Enter n Up      ]
-            [ LShift   n Z X C V B N M , . / n   RShift n Down    ]
-            [ LCtrl LGui LAlt n n n Space n n n RAlt n n Application RCtrl n ]
+            [   1 2 3 4 5 6 7 8 9 0 - = n BSpace Delete  Escape   ]
+            [ n Q W E R T Y U I O P '[' ']' '\\' PScreen Tab      ]
+            [ n A S D F G H J K L ; '\'' Enter n Up      CapsLock ]
+            [ n Z X C V B N M , . / n   RShift n Down    LShift   ]
+            [ LGui LAlt n n n Space n n n RAlt n n Application RCtrl n LCtrl ]
         }
     };
 
@@ -114,36 +130,6 @@ Keyboard_Layout = [ [ [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE,
                       [ Keycode.CAPS_LOCK , None, Keycode.A, Keycode.S, Keycode.D, Keycode.F, Keycode.G, Keycode.H, Keycode.J, Keycode.K, Keycode.L, Keycode.SEMICOLON, Keycode.QUOTE, Keycode.ENTER, None, Keycode.UP_ARROW ],
                       [ Keycode.LEFT_SHIFT, None, Keycode.Z, Keycode.X, Keycode.C, Keycode.V, Keycode.B, Keycode.N, Keycode.M, Keycode.COMMA, Keycode.PERIOD, Keycode.FORWARD_SLASH, None, Keycode.RIGHT_SHIFT, None, Keycode.DOWN_ARROW ],
                       [ Keycode.LEFT_CONTROL, Keycode.LEFT_GUI, Keycode.LEFT_ALT, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, function_key_layer_hold(2), None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ],
-                    
-                    [ [ Keycode.GRAVE_ACCENT, Keycode.F1, Keycode.F2, Keycode.F3, Keycode.F4, Keycode.F5, Keycode.F6, Keycode.F7, Keycode.F8, Keycode.F9, Keycode.F10, Keycode.F11, Keycode.F12, None, None, Keycode.HOME ],
-                      [ macro1(), None, None, Keycode.UP_ARROW, None, None, None, None, None, None, None, None, None, None, None, Keycode.END ],
-                      [ Keycode.KEYPAD_NUMLOCK, None, Keycode.LEFT_ARROW, Keycode.DOWN_ARROW, Keycode.RIGHT_ARROW, None, None, None, None, None, None, None, None, Keycode.INSERT, None, Keycode.PAGE_UP],
-                      [ Keycode.LEFT_SHIFT, None, None, None, None, None, None, None, None, None, None, None, None, None, None, Keycode.PAGE_DOWN],
-                      [ Keycode.LEFT_CONTROL, Keycode.SCROLL_LOCK, None, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, None, None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ],
-                      
-                    [ [ board_reload(), None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.SCAN_PREVIOUS_TRACK],
-                      [ None, None, lighting_mode(-1), lighting_toggle_on_off(), lighting_mode(1), None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.SCAN_NEXT_TRACK],
-                      [ None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.VOLUME_INCREMENT],
-                      [ None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.VOLUME_DECREMENT],
-                      [ None, None, None, None, None, None, ConsumerControlCode.PLAY_PAUSE, None, None, None, None, function_key_layer_hold(2), None, None, None, ConsumerControlCode.MUTE] ] ]
-
-# The Pin Matrix
-keyboard_cols_array = []
-keyboard_rows_array = []
-
-# Make all col pin objects inputs with pullups.
-for pin in keyboard_cols:
-    key_pin = digitalio.DigitalInOut(pin)           
-    key_pin.direction = digitalio.Direction.OUTPUT
-    key_pin.value = False
-    keyboard_cols_array.append(key_pin)
-    
-# Make all row pin objects inputs with pullups
-for pin in keyboard_rows:
-    key_pin = digitalio.DigitalInOut(pin)
-    key_pin.direction = digitalio.Direction.INPUT
-    key_pin.pull = digitalio.Pull.DOWN
-    keyboard_rows_array.append(key_pin)
 */
         let gpio_col0 = pins.gpio0;
         let gpio_col1 = pins.gpio1;
@@ -176,7 +162,6 @@ for pin in keyboard_rows:
         let matrix: Matrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
             Matrix::new(
                 [
-                    gpio_col0.into_pull_up_input().into(),
                     gpio_col1.into_pull_up_input().into(),
                     gpio_col2.into_pull_up_input().into(),
                     gpio_col3.into_pull_up_input().into(),
@@ -191,7 +176,8 @@ for pin in keyboard_rows:
                     gpio_col12.into_pull_up_input().into(),
                     gpio_col13.into_pull_up_input().into(),
                     gpio_col14.into_pull_up_input().into(),
-                    gpio_col15.into_pull_up_input().into()
+                    gpio_col15.into_pull_up_input().into(),
+                    gpio_col0.into_pull_up_input().into(), // Switched as a workaround to scanning issue (see above)
                 ],
                 [
                     gpio_row0.into_push_pull_output().into(),
@@ -206,7 +192,7 @@ for pin in keyboard_rows:
 
         let layout = Layout::new(LAYERS);
         let debouncer: keyberon::debounce::Debouncer<keyberon::matrix::PressedKeys<NUM_COLUMNS, NUM_ROWS>> =
-            Debouncer::new(PressedKeys::default(), PressedKeys::default(), 30);
+            Debouncer::new(PressedKeys::default(), PressedKeys::default(), 15);
 
         let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
         let mut alarm = timer.alarm_0().unwrap();
