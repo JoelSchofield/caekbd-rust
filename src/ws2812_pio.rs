@@ -1,4 +1,3 @@
-#![no_std]
 //! WS2812 PIO Driver for the RP2040
 //!
 //! This driver implements driving a WS2812 RGB LED strip from
@@ -14,9 +13,7 @@
 //! yourself then.
 
 use cortex_m;
-use embedded_hal::timer::CountDown;
 use embedded_time::{
-    duration::{Extensions, Microseconds},
     fixed_point::FixedPoint,
 };
 use rp_pico::hal::{
@@ -166,93 +163,5 @@ where
             }
         }
         Ok(())
-    }
-}
-
-
-/// Instance of a WS2812 LED chain.
-///
-/// Use the [Ws2812::write] method to update the WS2812 LED chain.
-///
-/// Typical usage example:
-///```ignore
-/// use rp_pico::hal::clocks::init_clocks_and_plls;
-/// let clocks = init_clocks_and_plls(...);
-/// let pins = rp_pico::hal::gpio::pin::bank0::Pins::new(...);
-///
-/// let timer = Timer::new(pac.TIMER, &mut pac.RESETS);
-///
-/// let (mut pio, sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
-/// let mut ws = Ws2812::new(
-///     pins.gpio4.into_mode(),
-///     &mut pio,
-///     sm0,
-///     clocks.peripheral_clock.freq(),
-///     timer.count_down(),
-/// );
-///
-/// loop {
-///     use smart_leds::{SmartLedsWrite, RGB8};
-///     let color : RGB8 = (255, 0, 255).into();
-///
-///     ws.write([color].iter().copied()).unwrap();
-///
-///     // Do other stuff here...
-/// };
-///```
-pub struct Ws2812<P, SM, C, I>
-where
-    I: PinId,
-    C: CountDown,
-    P: PIOExt + FunctionConfig,
-    Function<P>: ValidPinMode<I>,
-    SM: StateMachineIndex,
-{
-    driver: Ws2812Direct<P, SM, I>,
-    cd: C,
-}
-
-impl<P, SM, C, I> Ws2812<P, SM, C, I>
-where
-    I: PinId,
-    C: CountDown,
-    P: PIOExt + FunctionConfig,
-    Function<P>: ValidPinMode<I>,
-    SM: StateMachineIndex,
-{
-    /// Creates a new instance of this driver.
-    pub fn new(
-        pin: Pin<I, Function<P>>,
-        pio: &mut PIO<P>,
-        sm: UninitStateMachine<(P, SM)>,
-        clock_freq: embedded_time::rate::Hertz,
-        cd: C,
-    ) -> Ws2812<P, SM, C, I> {
-        let driver = Ws2812Direct::new(pin, pio, sm, clock_freq);
-
-        Self { driver, cd }
-    }
-}
-
-impl<P, SM, C, I> SmartLedsWrite for Ws2812<P, SM, C, I>
-where
-    I: PinId,
-    C: CountDown,
-    C::Time: From<Microseconds>,
-    P: PIOExt + FunctionConfig,
-    Function<P>: ValidPinMode<I>,
-    SM: StateMachineIndex,
-{
-    type Color = smart_leds_trait::RGB8;
-    type Error = ();
-    fn write<T, J>(&mut self, iterator: T) -> Result<(), ()>
-    where
-        T: Iterator<Item = J>,
-        J: Into<Self::Color>,
-    {
-        self.cd.start(60.microseconds());
-        let _ = nb::block!(self.cd.wait());
-
-        self.driver.write(iterator)
     }
 }

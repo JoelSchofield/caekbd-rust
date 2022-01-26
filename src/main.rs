@@ -5,6 +5,7 @@ use panic_halt as _;
 
 mod ws2812_pio;
 mod slow_matrix;
+mod led_state;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
@@ -27,10 +28,11 @@ mod app {
     use keyberon::key_code;
     use keyberon::layout::Layout;
     use keyberon::matrix::PressedKeys;
-    use crate::slow_matrix::SlowMatrix;
     use usb_device::class_prelude::*;
-    use smart_leds::{SmartLedsWrite, RGB8};
+    use smart_leds::SmartLedsWrite;
     use crate::ws2812_pio::Ws2812Direct;
+    use crate::slow_matrix::SlowMatrix;
+    use crate::led_state::LedState;
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
@@ -89,7 +91,8 @@ mod app {
         debouncer: Debouncer<PressedKeys<NUM_COLUMNS, NUM_ROWS>>,
         //led_driver: Ws2812Direct<Pin<Gpio13, PushPullOutput>, UninitStateMachine<(PIO<PIO0>, StateMachineIndex)>, DynPinId>
         led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
-        wheel_num: u8
+        wheel_num: u8,
+        led_state: LedState<NUM_LEDS>
     }
 
     #[local]
@@ -163,6 +166,8 @@ mod app {
             clocks.peripheral_clock.freq(),
         );
 
+        let led_state: LedState<NUM_LEDS> = LedState::new();
+
         let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
             SlowMatrix::new(
                 [
@@ -232,7 +237,8 @@ mod app {
                 layout,
                 debouncer,
                 led_driver,
-                wheel_num
+                wheel_num,
+                led_state
             },
             Local {},
             init::Monotonics(),
@@ -273,7 +279,7 @@ mod app {
     #[task(
         binds = TIMER_IRQ_0,
         priority = 1,
-        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, wheel_num],
+        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, wheel_num, led_state],
     )]
     fn scan_timer_irq(mut c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
@@ -298,40 +304,18 @@ mod app {
         if c.shared.usb_class.lock(|k| k.device_mut().set_keyboard_report(report.clone())) {
             while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
         }
-
-        (c.shared.wheel_num, c.shared.led_driver).lock(|wheel_num, led_driver| {
-            let colour: RGB8 = wheel_rgb(*wheel_num).into();
-            led_driver.write([colour; NUM_LEDS].iter().copied()).unwrap();
-            *wheel_num = wheel_num.wrapping_add(1);
-        });
-    }
-
-    fn wheel_rgb(mut wheel_pos: u8) -> (u8, u8, u8) {
-        wheel_pos = 255 - wheel_pos;
-
-        let r: u8;
-        let g: u8;
-        let b: u8;
-
-        if wheel_pos < 85 {
-            r = 255 - wheel_pos * 3;
-            g = 0;
-            b = wheel_pos * 3;
-            
-        }
-        else if wheel_pos < 170 {
-            wheel_pos -= 85;
-            r = 0;
-            g = wheel_pos * 3;
-            b = 255 - wheel_pos * 3;
-        }
-        else {
-            wheel_pos -= 170;
-            r = wheel_pos * 3;
-            g = 255 - wheel_pos * 3;
-            b = 0;
-        }
         
-        return (r, g, b);
+        (c.shared.led_state, c.shared.led_driver).lock(|led_state, led_driver| {
+            led_state.tick();
+            let data = led_state.get_grb();
+            led_driver.write(data.iter().copied()).unwrap();
+        });
+
+
+        // (c.shared.wheel_num, c.shared.led_driver).lock(|wheel_num, led_driver| {
+        //     let colour: RGB8 = wheel_rgb(*wheel_num).into();
+        //     led_driver.write([colour; NUM_LEDS].iter().copied()).unwrap();
+        //     *wheel_num = wheel_num.wrapping_add(1);
+        // });
     }
 }
