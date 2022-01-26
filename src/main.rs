@@ -12,9 +12,14 @@ mod app {
     use cortex_m::prelude::_embedded_hal_watchdog_Watchdog;
     use cortex_m::prelude::_embedded_hal_watchdog_WatchdogEnable;
     use rp_pico::{
-        hal::{self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock, pio::PIOExt},
-        XOSC_CRYSTAL_FREQ
+        XOSC_CRYSTAL_FREQ,
+        hal::{
+            self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock,
+            pio::{PIOExt, SM0},
+            gpio::pin::bank0::Gpio13
+        }
     };
+    use rp_pico::pac::PIO0;
     use embedded_time::duration::units::*;
     use rp_pico::hal::gpio::DynPin;
     use rp_pico::hal::usb::UsbBus;
@@ -25,7 +30,6 @@ mod app {
     use crate::slow_matrix::SlowMatrix;
     use usb_device::class_prelude::*;
     use smart_leds::{SmartLedsWrite, RGB8};
-    use embedded_hal::timer::CountDown;
     use crate::ws2812_pio::Ws2812Direct;
 
     const SCAN_TIME_US: u32 = 1000;
@@ -56,10 +60,6 @@ mod app {
     */
 
     #[rustfmt::skip]
-    // Note first column is shifted to the end. This is due to some timing issue with keyberon and matrix.rs coupled,
-    // with some capacitance that is present on the first column, which was resulting in the following rows key being
-    // pressed everytime you pushed a key in the first column. i.e. pressing 'Escape' would also press 'Tab'.
-    // Forking the repo and adding a small delay between switching rows would probably fix the issue too.
     pub static LAYERS: keyberon::layout::Layers = keyberon::layout::layout! {
         {
             [Escape     1 2 3 4 5 6 7 8 9 0 - = n BSpace Delete  ]
@@ -86,7 +86,10 @@ mod app {
         matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS>,
         layout: Layout,
         #[lock_free]
-        debouncer: Debouncer<PressedKeys<NUM_COLUMNS, NUM_ROWS>>
+        debouncer: Debouncer<PressedKeys<NUM_COLUMNS, NUM_ROWS>>,
+        //led_driver: Ws2812Direct<Pin<Gpio13, PushPullOutput>, UninitStateMachine<(PIO<PIO0>, StateMachineIndex)>, DynPinId>
+        led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
+        wheel_num: u8
     }
 
     #[local]
@@ -151,30 +154,14 @@ mod app {
             cortex_m::asm::nop();
         }
 
-        let ws2812_timer = hal::timer::Timer::new(c.device.TIMER, &mut resets);
-
-        let mut sleepy = ws2812_timer.count_down();
-        sleepy.start(10.milliseconds());
-
         let (mut pio, sm0, _, _, _) = c.device.PIO0.split(&mut resets);
 
-        let mut ws = Ws2812Direct::new(
+        let led_driver = Ws2812Direct::new(
             pins.gpio13.into_mode(),
             &mut pio,
             sm0,
             clocks.peripheral_clock.freq(),
         );
-
-        let mut wheel_val: u8 = 0;
-
-        loop {
-            let colour: RGB8 = wheel_rgb(wheel_val).into();
-            ws.write([colour; NUM_LEDS].iter().copied()).unwrap();
-
-            wheel_val = wheel_val.wrapping_add(1);
-
-            let _ = nb::block!(sleepy.wait());
-        };
 
         let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
             SlowMatrix::new(
@@ -232,6 +219,8 @@ mod app {
         // Start watchdog and feed it with the lowest priority task at 1000hz
         watchdog.start(10_000.microseconds());
 
+        let wheel_num = 0;
+
         (
             Shared {
                 usb_dev,
@@ -242,6 +231,8 @@ mod app {
                 matrix,
                 layout,
                 debouncer,
+                led_driver,
+                wheel_num
             },
             Local {},
             init::Monotonics(),
@@ -282,7 +273,7 @@ mod app {
     #[task(
         binds = TIMER_IRQ_0,
         priority = 1,
-        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class],
+        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, wheel_num],
     )]
     fn scan_timer_irq(mut c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
@@ -307,6 +298,12 @@ mod app {
         if c.shared.usb_class.lock(|k| k.device_mut().set_keyboard_report(report.clone())) {
             while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
         }
+
+        (c.shared.wheel_num, c.shared.led_driver).lock(|wheel_num, led_driver| {
+            let colour: RGB8 = wheel_rgb(*wheel_num).into();
+            led_driver.write([colour; NUM_LEDS].iter().copied()).unwrap();
+            *wheel_num = wheel_num.wrapping_add(1);
+        });
     }
 
     fn wheel_rgb(mut wheel_pos: u8) -> (u8, u8, u8) {
@@ -338,30 +335,3 @@ mod app {
         return (r, g, b);
     }
 }
-
-
-/*
-# The Physical Pins
-#                       COL0       COL1       COL2       COL3       COL4       COL5       COL6       COL7       COL8        COL9        COL10       COL11       COL12       COL13       COL14       COL15
-keyboard_cols = [ board.GP0, board.GP1, board.GP2, board.GP3, board.GP6, board.GP7, board.GP8, board.GP9, board.GP10, board.GP11, board.GP12, board.GP14, board.GP15, board.GP16, board.GP6, board.GP18 ]
-#                       ROW0        ROW1        ROW2        ROW3        ROW4
-keyboard_rows = [ board.GP19, board.GP20, board.GP21, board.GP22, board.GP26 ]
-
-# The Pin Matrix
-keyboard_cols_array = []
-keyboard_rows_array = []
-
-# Make all col pin objects inputs with pullups.
-for pin in keyboard_cols:
-    key_pin = digitalio.DigitalInOut(pin)           
-    key_pin.direction = digitalio.Direction.OUTPUT
-    key_pin.value = False
-    keyboard_cols_array.append(key_pin)
-    
-# Make all row pin objects inputs with pullups
-for pin in keyboard_rows:
-    key_pin = digitalio.DigitalInOut(pin)
-    key_pin.direction = digitalio.Direction.INPUT
-    key_pin.pull = digitalio.Pull.DOWN
-    keyboard_rows_array.append(key_pin)
-*/
