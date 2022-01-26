@@ -1,5 +1,5 @@
 [package]
-name = "caekdb_rust"
+name = "pinci"
 version = "0.1.0"
 edition = "2018"
 
@@ -11,7 +11,8 @@ embedded-time = "0.12.0"
 usb-device= "0.2.8"
 usbd-serial = "0.1.1"
 usbd-hid = "0.5.0"
-keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "23deef5d6330c3167025a1f4aeccdc44e3d44ec1" }
+# keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "23deef5d6330c3167025a1f4aeccdc44e3d44ec1" }
+keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "58ac73cfcd09659bf31ee405ff9f5e23b0edc527" }
 panic-halt= "0.2.0"
 embedded-hal ="0.2.5"
 # rp2040-hal = { git = "https://github.com/rp-rs/rp-hal", rev = "53d9dbdf524a63ae78d06fd93e25de73aa005015", features = ["rt"] }
@@ -22,21 +23,11 @@ smart-leds-trait = "0.2.1"
 nb = "1.0.0"
 pio = "0.1.0"
 
-#[profile.dev]
-#lto = true
-#incremental = false
-#opt-level = "z"
-#debug = true
-
 [profile.dev]
-#codegen-units = 1
-#debug = 2
 lto = true
-debug = true
-debug-assertions = true # <-
 incremental = false
-#opt-level = 3 # <-
-overflow-checks = true # <-
+opt-level = "z"
+debug = true
 
 [profile.release]
 lto = true
