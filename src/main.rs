@@ -15,7 +15,7 @@ mod app {
     use rp_pico::{
         XOSC_CRYSTAL_FREQ,
         hal::{
-            self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock,
+            self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock, rosc,
             pio::{PIOExt, SM0},
             gpio::pin::bank0::Gpio13
         }
@@ -32,7 +32,8 @@ mod app {
     use smart_leds::SmartLedsWrite;
     use crate::ws2812_pio::Ws2812Direct;
     use crate::slow_matrix::SlowMatrix;
-    use crate::led_state::LedState;
+    use crate::led_state::{LedState, LedMode};
+    use rand_core::RngCore;
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
@@ -92,7 +93,8 @@ mod app {
         //led_driver: Ws2812Direct<Pin<Gpio13, PushPullOutput>, UninitStateMachine<(PIO<PIO0>, StateMachineIndex)>, DynPinId>
         led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
         wheel_num: u8,
-        led_state: LedState<NUM_LEDS>
+        led_state: LedState<NUM_LEDS>,
+        rng: rosc::RingOscillator<rosc::Enabled>
     }
 
     #[local]
@@ -121,6 +123,8 @@ mod app {
             sio.gpio_bank0,
             &mut resets,
         );
+
+        let mut rng = rosc::RingOscillator::new(c.device.ROSC).initialize();
 
         /*
         # Physical Pins
@@ -166,7 +170,8 @@ mod app {
             clocks.peripheral_clock.freq(),
         );
 
-        let led_state: LedState<NUM_LEDS> = LedState::new();
+        let mut led_state: LedState<NUM_LEDS> = LedState::new();
+        led_state.set_mode(LedMode::KeypressFade);
 
         let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
             SlowMatrix::new(
@@ -238,7 +243,8 @@ mod app {
                 debouncer,
                 led_driver,
                 wheel_num,
-                led_state
+                led_state,
+                rng
             },
             Local {},
             init::Monotonics(),
@@ -279,7 +285,7 @@ mod app {
     #[task(
         binds = TIMER_IRQ_0,
         priority = 1,
-        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, wheel_num, led_state],
+        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, wheel_num, led_state, rng],
     )]
     fn scan_timer_irq(mut c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
@@ -305,17 +311,14 @@ mod app {
             while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
         }
         
-        (c.shared.led_state, c.shared.led_driver).lock(|led_state, led_driver| {
+        (c.shared.led_state, c.shared.led_driver, c.shared.rng).lock(|led_state, led_driver, rng| {
+            
+            let random_num = rng.next_u32();
+            let random_index = rng.next_u32();
+            led_state.handle_keypress(random_num, random_index);
             led_state.tick();
             let data = led_state.get_grb();
             led_driver.write(data.iter().copied()).unwrap();
         });
-
-
-        // (c.shared.wheel_num, c.shared.led_driver).lock(|wheel_num, led_driver| {
-        //     let colour: RGB8 = wheel_rgb(*wheel_num).into();
-        //     led_driver.write([colour; NUM_LEDS].iter().copied()).unwrap();
-        //     *wheel_num = wheel_num.wrapping_add(1);
-        // });
     }
 }

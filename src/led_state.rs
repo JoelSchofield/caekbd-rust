@@ -1,7 +1,8 @@
 use smart_leds::RGB8;
 
 pub enum LedMode {
-    RAINBOW
+    Rainbow,
+    KeypressFade
 }
 
 // #[derive(Copy, Clone)]
@@ -46,10 +47,10 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
             leds: [RGB8 {r: 0, g: 0, b: 0}; NUM_LEDS],
             wheel_positions: [0; NUM_LEDS],
             tick_count: 0,
-            led_mode: LedMode::RAINBOW
+            led_mode: LedMode::Rainbow
         };
 
-        ret.set_mode(LedMode::RAINBOW);
+        ret.set_mode(LedMode::Rainbow);
         return ret;
     }
 
@@ -63,14 +64,22 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
 
     pub fn set_mode(&mut self, mode: LedMode) {
         match mode {
-            LedMode::RAINBOW => {
+            LedMode::Rainbow => {
                 self.init_rainbow();
             },
+            LedMode::KeypressFade => {
+                self.init_keypress_fade();
+            }
         }
     }
 
+    fn init_keypress_fade(&mut self) {
+        self.led_mode = LedMode::KeypressFade;
+        self.clear();
+    }
+
     fn init_rainbow(&mut self) {
-        self.led_mode = LedMode::RAINBOW;
+        self.led_mode = LedMode::Rainbow;
 
         let step = u8::MAX as f32 / NUM_LEDS as f32;
         
@@ -93,10 +102,35 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
         }
     }
 
+    // TODO: Complete this
+    pub fn handle_keypress(&mut self, random_num: u32, random_index: u32) {
+        if random_num % 1000 == 0 {
+            let index = (random_index % 16) as usize;
+            self.leds[index].r = 255;
+            self.leds[index].g = 255;
+        }
+    }
+
+    fn tick_keypress_fade(&mut self) {
+        if self.tick_count < 1 {
+            self.tick_count += 1;
+            return;
+        }
+        else {
+            self.tick_count = 0;
+            for led in self.leds.iter_mut() {
+                led.r = led.r.saturating_sub(1);
+                led.g = led.g.saturating_sub(1);
+                led.b = led.b.saturating_sub(1);
+            }
+        }
+    }
+
     pub fn tick(&mut self) {
         // TODO: Add modes
         match self.led_mode {
-            LedMode::RAINBOW => self.tick_rainbow()
+            LedMode::Rainbow => self.tick_rainbow(),
+            LedMode::KeypressFade => self.tick_keypress_fade()
         }
     }
 
