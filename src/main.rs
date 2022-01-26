@@ -4,6 +4,7 @@
 use panic_halt as _;
 
 mod hack;
+mod ws2812_pio;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
@@ -11,8 +12,9 @@ mod app {
     use cortex_m::prelude::_embedded_hal_watchdog_Watchdog;
     use cortex_m::prelude::_embedded_hal_watchdog_WatchdogEnable;
     use rp_pico::{
-        hal::{self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio},
+        hal::{self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock, pio::PIOExt},
         XOSC_CRYSTAL_FREQ,
+        
     };
     use embedded_hal::digital::v2::{InputPin, OutputPin};
     use embedded_time::duration::units::*;
@@ -27,8 +29,11 @@ mod app {
     use smart_leds::{SmartLedsWrite, White, RGBW};
     use crate::hack::Ws2812;
     use embedded_hal::timer::CountDown;
+    use crate::ws2812_pio::Ws2812Direct;
 
     const SCAN_TIME_US: u32 = 1000;
+    const NUM_LEDS: usize = 17;
+
     static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<rp_pico::hal::usb::UsbBus>> = None;
 
     #[rustfmt::skip]
@@ -97,102 +102,30 @@ mod app {
         let gpio_row1 = pins.gpio20;
 
         let ws2812_timer = hal::timer::Timer::new(c.device.TIMER, &mut resets);
-        let mut countdown = ws2812_timer.count_down();
-        countdown.start(333.nanoseconds());
-
-        let mut ws2812_pin = pins.gpio13.into_push_pull_output();
-
-        // delay for power on
-        for _ in 0..10000000 {
-            cortex_m::asm::nop();
-        }
 
         let mut sleepy = ws2812_timer.count_down();
-        sleepy.start(100.milliseconds());
+        sleepy.start(10.milliseconds());
 
-        let pixels = [0xF00, 0x0F0, 0x00F, 0xF00, 0x0F0, 0x00F];
+        let (mut pio, sm0, _, _, _) = c.device.PIO0.split(&mut resets);
 
-        //for pixel in pixels {
-        for x in 0..0xFFF {
-            let div = 4;
+        let mut ws = Ws2812Direct::new(
+            pins.gpio13.into_mode(),
+            &mut pio,
+            sm0,
+            clocks.peripheral_clock.freq(),
+        );
 
-            let mut working_pix = x;
-            
-            for _ in 0..24 {
-                if (working_pix & 1u32) == 1u32 {
-                    ws2812_pin.set_high().ok();
-                    //cortex_m::asm::delay(87 / div);
-                    cortex_m::asm::delay(60);
-                    ws2812_pin.set_low().ok();
-                    //cortex_m::asm::delay(75 / div);
-                    cortex_m::asm::delay(40);
-                }
-                else {
-                    ws2812_pin.set_high().ok();
-                    //cortex_m::asm::delay(44 / div);
-                    cortex_m::asm::delay(44 / div);
-                    ws2812_pin.set_low().ok();
-                    cortex_m::asm::delay(100 / div);
-                    //cortex_m::asm::delay(100 / div);
-                }
-                
-                working_pix = working_pix >> 1;
-            }
-
-            let _ = nb::block!(sleepy.wait());
-        }
-
-        let mut ws = Ws2812::new(countdown, ws2812_pin);
-
-        const NUM_LEDS: usize = 8;
-        let mut data = [RGBW::default(); NUM_LEDS];
-        let empty: [RGBW<u8>; NUM_LEDS] = [RGBW::default(); NUM_LEDS];
-
-        // Blink the LED's in a blue-green-red-white pattern.
-        for led in data.iter_mut().step_by(4) {
-            led.b = 0x05;
-        }
-
-        if NUM_LEDS > 1 {
-            for led in data.iter_mut().skip(1).step_by(4) {
-                led.g = 0x05;
-            }
-        }
-
-        if NUM_LEDS > 2 {
-            for led in data.iter_mut().skip(2).step_by(4) {
-                led.r = 0x05;
-            }
-        }
-
-        if NUM_LEDS > 3 {
-            for led in data.iter_mut().skip(3).step_by(4) {
-                led.a = White(0x10);
-            }
-        }
+        let mut wheel_val: u8 = 0;
 
         loop {
-            // let first_data = [RGBW::default(); 1];
+            use smart_leds::{SmartLedsWrite, RGB8};
+            let colour: RGB8 = wheel_rgb(wheel_val).into();
+            ws.write([colour; NUM_LEDS].iter().copied()).unwrap();
 
-            // ws.write(first_data.iter().cloned()).unwrap();
+            wheel_val = wheel_val.wrapping_add(1);
 
-            // let mut x = ws2812_timer.count_down();
-            // x.start(1.seconds());
-            // let _ = nb::block!(x.wait());
-
-            // let second_data = [RGBW::default(); 2];
-
-            // ws.write(second_data.iter().cloned()).unwrap();
-
-            // let _ = nb::block!(x.wait());
-
-            // ws.write(data.iter().cloned()).unwrap();
-            
-            //ws.write(empty.iter().cloned()).unwrap();
-            //for _ in 0..1000 {
-            //    cortex_m::asm::nop();
-            //}
-        }
+            let _ = nb::block!(sleepy.wait());
+        };
 
         let matrix: Matrix<DynPin, DynPin, 6, 1> = cortex_m::interrupt::free(move |_cs| {
             Matrix::new(
@@ -311,28 +244,33 @@ mod app {
         }
     }
 
-    /// Input a value 0 to 255 to get a color value
-    /// The colours are a transition r - g - b - back to r.
-    fn wheel(mut wheel_pos: u8) -> u32 {
+    fn wheel_rgb(mut wheel_pos: u8) -> (u8, u8, u8) {
         wheel_pos = 255 - wheel_pos;
+
+        let r: u8;
+        let g: u8;
+        let b: u8;
+
         if wheel_pos < 85 {
-            let r: u32 = (255 - wheel_pos as u32 * 3) << 16;
-            let g: u32 = 0 << 8;
-            let b: u32 = wheel_pos as u32 * 3;
-            return r & g & b;
+            r = 255 - wheel_pos * 3;
+            g = 0;
+            b = wheel_pos * 3;
+            
         }
-        if wheel_pos < 170 {
+        else if wheel_pos < 170 {
             wheel_pos -= 85;
-            let r: u32 = 0 << 16;
-            let g: u32 = (wheel_pos as u32 * 3) << 8;
-            let b: u32 = 255 - wheel_pos as u32 * 3;
-            return r & g & b;
+            r = 0;
+            g = wheel_pos * 3;
+            b = 255 - wheel_pos * 3;
         }
-        wheel_pos -= 170;
-        let r: u32 = (wheel_pos as u32 * 3) << 16;
-        let g: u32 = (255 - wheel_pos as u32 * 3) << 8;
-        let b: u32 = 0;
-        return r & g & b;
+        else {
+            wheel_pos -= 170;
+            r = wheel_pos * 3;
+            g = 255 - wheel_pos * 3;
+            b = 0;
+        }
+        
+        return (r, g, b);
     }
 }
 

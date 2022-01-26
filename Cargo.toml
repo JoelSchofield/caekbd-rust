@@ -20,6 +20,7 @@ rp-pico = "0.2.0"
 smart-leds = "0.3.0"
 smart-leds-trait = "0.2.1"
 nb = "1.0.0"
+pio = "0.1.0"
 
 #[profile.dev]
 #lto = true
