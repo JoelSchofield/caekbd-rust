@@ -1,53 +1,32 @@
 use smart_leds::RGB8;
+use rand_core::RngCore;
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LedMode {
     Rainbow,
-    KeypressFade
+    Lightning,
+    Chase
 }
 
-// #[derive(Copy, Clone)]
-// struct RGB {
-//     r: u8,
-//     g: u8,
-//     b: u8
-// }
-
-// impl RGB {
-//     pub fn new() -> Self {
-//         Self {
-//             r: 0,
-//             g: 0,
-//             b: 0
-//         }
-//     }
-
-//     pub fn clear(&mut self) {
-//         self.r = 0;
-//         self.g = 0;
-//         self.b = 0;
-//     }
-// }
-
-// impl From<RGB8> for RGB {
-//     fn from(item: RGB8) -> Self {
-//         RGB { r: item.r, g: item.g, b: item.}
-//     }
-// }
-
-pub struct LedState<const NUM_LEDS: usize> {
+pub struct LedState<R: RngCore, const NUM_LEDS: usize>
+{
     leds: [RGB8; NUM_LEDS],
     wheel_positions: [u8; NUM_LEDS],
     tick_count: u32,
-    led_mode: LedMode
+    led_mode: LedMode,
+    chase_cnt: usize,
+    rng: R
 }
 
-impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
-    pub fn new() -> Self {
+impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
+    pub fn new(rng: R) -> Self {
         let mut ret = Self { 
             leds: [RGB8 {r: 0, g: 0, b: 0}; NUM_LEDS],
             wheel_positions: [0; NUM_LEDS],
             tick_count: 0,
-            led_mode: LedMode::Rainbow
+            led_mode: LedMode::Rainbow,
+            chase_cnt: 0,
+            rng
         };
 
         ret.set_mode(LedMode::Rainbow);
@@ -67,15 +46,13 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
             LedMode::Rainbow => {
                 self.init_rainbow();
             },
-            LedMode::KeypressFade => {
-                self.init_keypress_fade();
+            LedMode::Lightning => {
+                self.init_lightning();
+            },
+            LedMode::Chase => {
+                self.init_chase();
             }
         }
-    }
-
-    fn init_keypress_fade(&mut self) {
-        self.led_mode = LedMode::KeypressFade;
-        self.clear();
     }
 
     fn init_rainbow(&mut self) {
@@ -88,6 +65,16 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
         } 
     }
 
+    fn init_lightning(&mut self) {
+        self.led_mode = LedMode::Lightning;
+        self.clear();
+    }
+
+    fn init_chase(&mut self) {
+        self.led_mode = LedMode::Chase;
+        self.clear();
+    }
+
     fn tick_rainbow(&mut self) {
         if self.tick_count < 10 {
             self.tick_count += 1;
@@ -95,6 +82,7 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
         }
         else {
             self.tick_count = 0;
+            
             for i in 0..NUM_LEDS {
                 self.leds[i] = Self::wheel_rgb(self.wheel_positions[i]);
                 self.wheel_positions[i] = self.wheel_positions[i].wrapping_add(1);
@@ -102,17 +90,43 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
         }
     }
 
-    // TODO: Complete this
-    pub fn handle_keypress(&mut self, random_num: u32, random_index: u32) {
-        if random_num % 1000 == 0 {
-            let index = (random_index % 16) as usize;
-            self.leds[index].r = 255;
-            self.leds[index].g = 255;
+    fn tick_lightning(&mut self) {
+        if self.tick_count < 10 {
+            self.tick_count += 1;
+            return;
+        }
+        else {
+            self.tick_count = 0;
+
+            if self.one_in_chance(100) {
+                let random_key_index = self.rand_index(NUM_LEDS);
+                
+                if self.leds[random_key_index].r < 100 {
+                    
+                    if self.one_in_chance(2) {
+                        self.leds[random_key_index].r = 200;
+                        self.leds[random_key_index].g = 200;
+                        self.leds[random_key_index].b = 0;
+                    }
+                    else {
+                        self.leds[random_key_index].r = 200;
+                        self.leds[random_key_index].g = 200;
+                        self.leds[random_key_index].b = 70;
+                    }
+                }
+            }
+
+            for led in self.leds.iter_mut() {
+                led.r = led.r.saturating_sub(1);
+                led.g = led.g.saturating_sub(1);
+                led.b = led.b.saturating_sub(1);
+            }
         }
     }
 
-    fn tick_keypress_fade(&mut self) {
-        if self.tick_count < 1 {
+    fn tick_chase(&mut self) {
+
+        if self.tick_count < 10 {
             self.tick_count += 1;
             return;
         }
@@ -126,11 +140,65 @@ impl<const NUM_LEDS: usize> LedState<NUM_LEDS> {
         }
     }
 
+    fn handle_keypress_lightning(&mut self) {
+        let random_key_index = self.rand_index(NUM_LEDS);
+
+        if self.one_in_chance(2) {
+            self.leds[random_key_index].r = 255;
+            self.leds[random_key_index].g = 255;
+            self.leds[random_key_index].b = 0;
+        }
+        else {
+            self.leds[random_key_index].r = 255;
+            self.leds[random_key_index].g = 255;
+            self.leds[random_key_index].b = 125;
+        }
+    }
+
+    fn handle_keypress_chase(&mut self) {
+        self.chase_cnt += 1;
+        if self.chase_cnt >= NUM_LEDS {
+            self.chase_cnt = 0;
+        }
+
+        self.wheel_positions[0] = self.wheel_positions[0].wrapping_add(10);
+        self.leds[self.chase_cnt] = Self::wheel_rgb(self.wheel_positions[0])
+    }
+
+    pub fn handle_keypress(&mut self) {
+        match self.led_mode {
+
+            LedMode::Lightning => {
+                self.handle_keypress_lightning();
+            },
+            LedMode::Chase => {
+                self.handle_keypress_chase();
+            },
+            _ => ()
+        }
+    }
+
+    fn one_in_chance(&mut self, chance: u32) -> bool {
+        if self.rand_index(chance as usize) == 0 {
+            true
+        }
+        else {
+            false
+        }
+    }
+
+    fn rand_index(&mut self, len: usize) -> usize {
+        let random_num = self.rng.next_u32();
+        let ret = random_num as usize % len;
+        return ret;
+    }
+
     pub fn tick(&mut self) {
         // TODO: Add modes
         match self.led_mode {
             LedMode::Rainbow => self.tick_rainbow(),
-            LedMode::KeypressFade => self.tick_keypress_fade()
+            LedMode::Lightning => self.tick_lightning(),
+            LedMode::Chase => self.tick_chase(),
         }
     }
 

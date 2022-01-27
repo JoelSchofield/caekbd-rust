@@ -9,9 +9,9 @@ mod led_state;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
-
     use cortex_m::prelude::_embedded_hal_watchdog_Watchdog;
     use cortex_m::prelude::_embedded_hal_watchdog_WatchdogEnable;
+    use keyberon::layout::CustomEvent;
     use rp_pico::{
         XOSC_CRYSTAL_FREQ,
         hal::{
@@ -27,13 +27,13 @@ mod app {
     use keyberon::debounce::Debouncer;
     use keyberon::key_code;
     use keyberon::layout::Layout;
+    use keyberon::action::Action;
     use keyberon::matrix::PressedKeys;
     use usb_device::class_prelude::*;
     use smart_leds::SmartLedsWrite;
     use crate::ws2812_pio::Ws2812Direct;
     use crate::slow_matrix::SlowMatrix;
     use crate::led_state::{LedState, LedMode};
-    use rand_core::RngCore;
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
@@ -41,7 +41,7 @@ mod app {
     const NUM_ROWS: usize = 5;
     
     static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<rp_pico::hal::usb::UsbBus>> = None;
-
+    
     /*
     [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE, Keycode.FOUR, Keycode.FIVE, Keycode.SIX, Keycode.SEVEN, Keycode.EIGHT, Keycode.NINE, Keycode.ZERO, Keycode.MINUS, Keycode.EQUALS, None, Keycode.BACKSPACE, Keycode.DELETE ],
     [ Keycode.TAB, None, Keycode.Q, Keycode.W, Keycode.E, Keycode.R, Keycode.T, Keycode.Y, Keycode.U, Keycode.I, Keycode.O, Keycode.P, Keycode.LEFT_BRACKET, Keycode.RIGHT_BRACKET, Keycode.BACKSLASH, Keycode.PRINT_SCREEN ],
@@ -62,14 +62,35 @@ mod app {
     [ None, None, None, None, None, None, ConsumerControlCode.PLAY_PAUSE, None, None, None, None, function_key_layer_hold(2), None, None, None, ConsumerControlCode.MUTE] ] ]
     */
 
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+    pub enum CustomActions {
+        SetModeRainbow,
+        SetModeLightning,
+        SetModeChase,
+        RestartToUf2
+    }
+
+    const ACTION_SET_MODE_RAINBOW: Action<CustomActions> = Action::Custom(CustomActions::SetModeRainbow);
+    const ACTION_SET_MODE_LIGHTNING: Action<CustomActions> = Action::Custom(CustomActions::SetModeLightning);
+    const ACTION_SET_MODE_CHASE: Action<CustomActions> = Action::Custom(CustomActions::SetModeChase);
+    const ACTION_RESTART_TO_UF2: Action<CustomActions> = Action::Custom(CustomActions::RestartToUf2);
+
     #[rustfmt::skip]
-    pub static LAYERS: keyberon::layout::Layers = keyberon::layout::layout! {
+    pub static LAYERS: keyberon::layout::Layers<CustomActions> = keyberon::layout::layout! {
         {
             [Escape     1 2 3 4 5 6 7 8 9 0 - = n BSpace Delete  ]
             [Tab      n Q W E R T Y U I O P '[' ']' '\\' PScreen ]
             [CapsLock n A S D F G H J K L ; '\'' Enter n Up      ]
             [LShift   n Z X C V B N M , . / n   RShift n Down    ]
-            [LCtrl LGui LAlt n n n Space n n n RAlt n n Application RCtrl n ]
+            [LCtrl LGui LAlt n n n Space n n n RAlt n n Application RCtrl (1) ]
+
+        }
+        {
+            [t {ACTION_SET_MODE_RAINBOW} {ACTION_SET_MODE_LIGHTNING} {ACTION_SET_MODE_CHASE} t t t t t t t t t t t {ACTION_RESTART_TO_UF2} ]
+            [t t t t t t t t t t t t t t t t ]
+            [t t t t t t t t t t t t t t t t ]
+            [t t t t t t t t t t t t t Up t t ]
+            [t t t t t t t t t t t Left t Down Right (1) ]
         }
     };
 
@@ -87,14 +108,13 @@ mod app {
         watchdog: hal::watchdog::Watchdog,
         #[lock_free]
         matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS>,
-        layout: Layout,
+        layout: Layout<CustomActions>,
         #[lock_free]
         debouncer: Debouncer<PressedKeys<NUM_COLUMNS, NUM_ROWS>>,
-        //led_driver: Ws2812Direct<Pin<Gpio13, PushPullOutput>, UninitStateMachine<(PIO<PIO0>, StateMachineIndex)>, DynPinId>
+        #[lock_free]
         led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
-        wheel_num: u8,
-        led_state: LedState<NUM_LEDS>,
-        rng: rosc::RingOscillator<rosc::Enabled>
+        #[lock_free]
+        led_state: LedState<rosc::RingOscillator<rosc::Enabled>, NUM_LEDS>,
     }
 
     #[local]
@@ -124,7 +144,7 @@ mod app {
             &mut resets,
         );
 
-        let mut rng = rosc::RingOscillator::new(c.device.ROSC).initialize();
+        let rng = rosc::RingOscillator::new(c.device.ROSC).initialize();
 
         /*
         # Physical Pins
@@ -170,8 +190,7 @@ mod app {
             clocks.peripheral_clock.freq(),
         );
 
-        let mut led_state: LedState<NUM_LEDS> = LedState::new();
-        led_state.set_mode(LedMode::KeypressFade);
+        let led_state: LedState<rosc::RingOscillator<rosc::Enabled>, NUM_LEDS> = LedState::new(rng);
 
         let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
             SlowMatrix::new(
@@ -229,8 +248,6 @@ mod app {
         // Start watchdog and feed it with the lowest priority task at 1000hz
         watchdog.start(10_000.microseconds());
 
-        let wheel_num = 0;
-
         (
             Shared {
                 usb_dev,
@@ -242,9 +259,7 @@ mod app {
                 layout,
                 debouncer,
                 led_driver,
-                wheel_num,
-                led_state,
-                rng
+                led_state
             },
             Local {},
             init::Monotonics(),
@@ -262,30 +277,12 @@ mod app {
                 }
             })
         });
-
-        
     }
-
-//    #[task(priority = 2, capacity = 8, shared = [usb_dev, usb_class, layout])]
-//    fn handle_event(mut c: handle_event::Context, event: Option<layout::Event>) {
-//        let report: key_code::KbHidReport = c.shared.layout.lock(|l| l.keycodes().collect());
-//        if !c
-//            .shared
-//            .usb_class
-//            .lock(|k| k.device_mut().set_keyboard_report(report.clone()))
-//        {
-//            return;
-//        }
-//        if c.shared.usb_dev.lock(|d| d.state()) != UsbDeviceState::Configured {
-//            return;
-//        }
-//        while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
-//    }
 
     #[task(
         binds = TIMER_IRQ_0,
         priority = 1,
-        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, wheel_num, led_state, rng],
+        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, led_state],
     )]
     fn scan_timer_irq(mut c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
@@ -301,9 +298,30 @@ mod app {
             .debouncer
             .events(c.shared.matrix.get().unwrap())
         {
+            if event.is_press() {
+                c.shared.led_state.handle_keypress();
+            }
             c.shared.layout.lock(|l| l.event(event));
         }
-        c.shared.layout.lock(|l| l.tick());
+
+        let mut mode = None;
+
+        c.shared.layout.lock(|l| {
+            let custom_action = l.tick();
+
+            match custom_action {
+                CustomEvent::Press(CustomActions::SetModeRainbow) => mode = Some(LedMode::Rainbow),
+                CustomEvent::Press(CustomActions::SetModeLightning) => mode = Some(LedMode::Lightning),
+                CustomEvent::Press(CustomActions::SetModeChase) => mode = Some(LedMode::Chase),
+                CustomEvent::Press(CustomActions::RestartToUf2) => hal::rom_data::reset_to_usb_boot(0, 0),
+                _ => (),
+            }
+        });
+
+        match mode {
+            Some(x) => c.shared.led_state.set_mode(x),
+            None => ()
+        }
 
         let report: key_code::KbHidReport = c.shared.layout.lock(|l| l.keycodes().collect());
 
@@ -311,14 +329,9 @@ mod app {
             while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
         }
         
-        (c.shared.led_state, c.shared.led_driver, c.shared.rng).lock(|led_state, led_driver, rng| {
-            
-            let random_num = rng.next_u32();
-            let random_index = rng.next_u32();
-            led_state.handle_keypress(random_num, random_index);
-            led_state.tick();
-            let data = led_state.get_grb();
-            led_driver.write(data.iter().copied()).unwrap();
-        });
+        //led_state.handle_keypress(random_num, random_index);
+        c.shared.led_state.tick();
+        let data = c.shared.led_state.get_grb();
+        c.shared.led_driver.write(data.iter().copied()).unwrap();
     }
 }
