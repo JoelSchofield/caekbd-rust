@@ -6,11 +6,13 @@ use panic_halt as _;
 mod ws2812_pio;
 mod slow_matrix;
 mod led_state;
+mod keyboard;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
     use cortex_m::prelude::_embedded_hal_watchdog_Watchdog;
     use cortex_m::prelude::_embedded_hal_watchdog_WatchdogEnable;
+    use keyberon::hid;
     use keyberon::layout::CustomEvent;
     use rp_pico::{
         XOSC_CRYSTAL_FREQ,
@@ -34,6 +36,7 @@ mod app {
     use crate::ws2812_pio::Ws2812Direct;
     use crate::slow_matrix::SlowMatrix;
     use crate::led_state::{LedState, LedMode};
+    use crate::keyboard::{MediaKeyHidReport, MediaKey, KbHidReport, MediaKeyboard};
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
@@ -41,26 +44,6 @@ mod app {
     const NUM_ROWS: usize = 5;
     
     static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<rp_pico::hal::usb::UsbBus>> = None;
-    
-    /*
-    [ Keycode.ESCAPE, Keycode.ONE, Keycode.TWO, Keycode.THREE, Keycode.FOUR, Keycode.FIVE, Keycode.SIX, Keycode.SEVEN, Keycode.EIGHT, Keycode.NINE, Keycode.ZERO, Keycode.MINUS, Keycode.EQUALS, None, Keycode.BACKSPACE, Keycode.DELETE ],
-    [ Keycode.TAB, None, Keycode.Q, Keycode.W, Keycode.E, Keycode.R, Keycode.T, Keycode.Y, Keycode.U, Keycode.I, Keycode.O, Keycode.P, Keycode.LEFT_BRACKET, Keycode.RIGHT_BRACKET, Keycode.BACKSLASH, Keycode.PRINT_SCREEN ],
-    [ Keycode.CAPS_LOCK , None, Keycode.A, Keycode.S, Keycode.D, Keycode.F, Keycode.G, Keycode.H, Keycode.J, Keycode.K, Keycode.L, Keycode.SEMICOLON, Keycode.QUOTE, Keycode.ENTER, None, Keycode.UP_ARROW ],
-    [ Keycode.LEFT_SHIFT, None, Keycode.Z, Keycode.X, Keycode.C, Keycode.V, Keycode.B, Keycode.N, Keycode.M, Keycode.COMMA, Keycode.PERIOD, Keycode.FORWARD_SLASH, None, Keycode.RIGHT_SHIFT, None, Keycode.DOWN_ARROW ],
-    [ Keycode.LEFT_CONTROL, Keycode.LEFT_GUI, Keycode.LEFT_ALT, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, function_key_layer_hold(2), None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ] 
-    
-    [ [ Keycode.GRAVE_ACCENT, Keycode.F1, Keycode.F2, Keycode.F3, Keycode.F4, Keycode.F5, Keycode.F6, Keycode.F7, Keycode.F8, Keycode.F9, Keycode.F10, Keycode.F11, Keycode.F12, None, None, Keycode.HOME ],
-    [ macro1(), None, None, Keycode.UP_ARROW, None, None, None, None, None, None, None, None, None, None, None, Keycode.END ],
-    [ Keycode.KEYPAD_NUMLOCK, None, Keycode.LEFT_ARROW, Keycode.DOWN_ARROW, Keycode.RIGHT_ARROW, None, None, None, None, None, None, None, None, Keycode.INSERT, None, Keycode.PAGE_UP],
-    [ Keycode.LEFT_SHIFT, None, None, None, None, None, None, None, None, None, None, None, None, None, None, Keycode.PAGE_DOWN],
-    [ Keycode.LEFT_CONTROL, Keycode.SCROLL_LOCK, None, None, None, None, Keycode.SPACEBAR, None, None, None, Keycode.RIGHT_ALT, None, None, Keycode.APPLICATION, Keycode.RIGHT_CONTROL, function_key_layer_hold(1) ] ],
-    
-    [ [ board_reload(), None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.SCAN_PREVIOUS_TRACK],
-    [ None, None, lighting_mode(-1), lighting_toggle_on_off(), lighting_mode(1), None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.SCAN_NEXT_TRACK],
-    [ None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.VOLUME_INCREMENT],
-    [ None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, ConsumerControlCode.VOLUME_DECREMENT],
-    [ None, None, None, None, None, None, ConsumerControlCode.PLAY_PAUSE, None, None, None, None, function_key_layer_hold(2), None, None, None, ConsumerControlCode.MUTE] ] ]
-    */
 
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub enum CustomActions {
@@ -82,15 +65,22 @@ mod app {
             [Tab      n Q W E R T Y U I O P '[' ']' '\\' PScreen ]
             [CapsLock n A S D F G H J K L ; '\'' Enter n Up      ]
             [LShift   n Z X C V B N M , . / n   RShift n Down    ]
-            [LCtrl LGui LAlt n n n Space n n n RAlt n n Application RCtrl (1) ]
+            [LCtrl LGui LAlt n n n Space n n n RAlt (2) n Application RCtrl (1) ]
 
         }
         {
             [t {ACTION_SET_MODE_RAINBOW} {ACTION_SET_MODE_LIGHTNING} {ACTION_SET_MODE_CHASE} t t t t t t t t t t t {ACTION_RESTART_TO_UF2} ]
             [t t t t t t t t t t t t t t t t ]
+            [t t t t t t t t t t t t t t t MediaVolUp ]
+            [t t t t t t t t t t t t t Up t MediaVolDown ]
+            [t t t t t t MediaPlayPause t t t t Left t Down Right n ]
+        }
+        {
+            [t F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12 t t n ]
             [t t t t t t t t t t t t t t t t ]
-            [t t t t t t t t t t t t t Up t t ]
-            [t t t t t t t t t t t Left t Down Right (1) ]
+            [t t t t t t t t t t t t t t t t ]
+            [t t t t t t t t t t t t t t t t ]
+            [t t t t t t t t t t t t t t t n ]
         }
     };
 
@@ -100,7 +90,7 @@ mod app {
         usb_class: keyberon::hid::HidClass<
             'static,
             rp_pico::hal::usb::UsbBus,
-            keyberon::keyboard::Keyboard<()>,
+            crate::keyboard::MediaKeyboard,
         >,
         timer: hal::timer::Timer,
         alarm: hal::timer::Alarm0,
@@ -242,7 +232,8 @@ mod app {
         unsafe {
             USB_BUS = Some(usb_bus);
         }
-        let usb_class = keyberon::new_class(unsafe { USB_BUS.as_ref().unwrap() }, ());
+        //let usb_class = keyberon::new_class(unsafe { USB_BUS.as_ref().unwrap() }, ());
+        let usb_class = hid::HidClass::new(MediaKeyboard::default(), unsafe { USB_BUS.as_ref().unwrap() });
         let usb_dev = keyberon::new_device(unsafe { USB_BUS.as_ref().unwrap() });
 
         // Start watchdog and feed it with the lowest priority task at 1000hz
@@ -323,13 +314,41 @@ mod app {
             None => ()
         }
 
-        let report: key_code::KbHidReport = c.shared.layout.lock(|l| l.keycodes().collect());
+        let mut media_report = MediaKeyHidReport::default();
 
-        if c.shared.usb_class.lock(|k| k.device_mut().set_keyboard_report(report.clone())) {
-            while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
+        let kb_report: KbHidReport = c.shared.layout.lock(|l| {
+            // Create a media report from the layout keycodes. Note only one media key will be processed at a time.
+            for item in l.keycodes() {
+                if item == key_code::KeyCode::MediaVolUp {
+                    media_report = MediaKeyHidReport::from(&MediaKey::VolUp);
+                    break;
+                }
+                else if item == key_code::KeyCode::MediaVolDown {
+                    media_report = MediaKeyHidReport::from(&MediaKey::VolDown);
+                    break;
+                }
+                else if item == key_code::KeyCode::MediaPlayPause {
+                    media_report = MediaKeyHidReport::from(&MediaKey::PlayPause);
+                    break;
+                }
+            }
+
+            l.keycodes().collect()
+        });
+
+        // Send media key report, assembled from keycodes from out layout. Note media keys must be processed separate to
+        // normal keycodes.
+        if c.shared.usb_class.lock(|k| k.device_mut().set_media_report(media_report.clone())) {
+            c.shared.led_state.handle_keypress();
+            while let Ok(0) = c.shared.usb_class.lock(|k| k.write(media_report.as_bytes())) {}
+        }
+
+        // Send ordinary keyboard report
+        if c.shared.usb_class.lock(|k| k.device_mut().set_keyboard_report(kb_report.clone())) {
+            while let Ok(0) = c.shared.usb_class.lock(|k| k.write(kb_report.as_bytes())) {}
         }
         
-        //led_state.handle_keypress(random_num, random_index);
+        // Update led states
         c.shared.led_state.tick();
         let data = c.shared.led_state.get_grb();
         c.shared.led_driver.write(data.iter().copied()).unwrap();
