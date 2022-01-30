@@ -50,12 +50,14 @@ mod app {
         SetModeRainbow,
         SetModeLightning,
         SetModeChase,
+        SetModeChase2,
         RestartToUf2
     }
 
     const ACTION_SET_MODE_RAINBOW: Action<CustomActions> = Action::Custom(CustomActions::SetModeRainbow);
     const ACTION_SET_MODE_LIGHTNING: Action<CustomActions> = Action::Custom(CustomActions::SetModeLightning);
     const ACTION_SET_MODE_CHASE: Action<CustomActions> = Action::Custom(CustomActions::SetModeChase);
+    const ACTION_SET_MODE_CHASE_2: Action<CustomActions> = Action::Custom(CustomActions::SetModeChase2);
     const ACTION_RESTART_TO_UF2: Action<CustomActions> = Action::Custom(CustomActions::RestartToUf2);
 
     #[rustfmt::skip]
@@ -69,7 +71,7 @@ mod app {
 
         }
         {
-            [t {ACTION_SET_MODE_RAINBOW} {ACTION_SET_MODE_LIGHTNING} {ACTION_SET_MODE_CHASE} t t t t t t t t t t t {ACTION_RESTART_TO_UF2} ]
+            [t {ACTION_SET_MODE_RAINBOW} {ACTION_SET_MODE_LIGHTNING} {ACTION_SET_MODE_CHASE} {ACTION_SET_MODE_CHASE_2} t t t t t t t t t t {ACTION_RESTART_TO_UF2} ]
             [t t t t t t t t t t t t t t t t ]
             [t t t t t t t t t t t t t t t MediaVolUp ]
             [t t t t t t t t t t t t t Up t MediaVolDown ]
@@ -304,6 +306,7 @@ mod app {
                 CustomEvent::Press(CustomActions::SetModeRainbow) => mode = Some(LedMode::Rainbow),
                 CustomEvent::Press(CustomActions::SetModeLightning) => mode = Some(LedMode::Lightning),
                 CustomEvent::Press(CustomActions::SetModeChase) => mode = Some(LedMode::Chase),
+                CustomEvent::Press(CustomActions::SetModeChase2) => mode = Some(LedMode::Chase2),
                 CustomEvent::Press(CustomActions::RestartToUf2) => hal::rom_data::reset_to_usb_boot(0, 0),
                 _ => (),
             }

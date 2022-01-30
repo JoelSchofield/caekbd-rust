@@ -5,7 +5,8 @@ use rand_core::RngCore;
 pub enum LedMode {
     Rainbow,
     Lightning,
-    Chase
+    Chase,
+    Chase2
 }
 
 pub struct LedState<R: RngCore, const NUM_LEDS: usize>
@@ -14,7 +15,7 @@ pub struct LedState<R: RngCore, const NUM_LEDS: usize>
     wheel_positions: [u8; NUM_LEDS],
     tick_count: u32,
     led_mode: LedMode,
-    chase_cnt: usize,
+    chase_count: usize,
     rng: R
 }
 
@@ -25,11 +26,11 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             wheel_positions: [0; NUM_LEDS],
             tick_count: 0,
             led_mode: LedMode::Rainbow,
-            chase_cnt: 0,
+            chase_count: 0,
             rng
         };
 
-        ret.set_mode(LedMode::Rainbow);
+        ret.set_mode(LedMode::Chase2);
         return ret;
     }
 
@@ -51,6 +52,9 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             },
             LedMode::Chase => {
                 self.init_chase();
+            },
+            LedMode::Chase2 => {
+                self.init_chase_2();
             }
         }
     }
@@ -72,6 +76,11 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
 
     fn init_chase(&mut self) {
         self.led_mode = LedMode::Chase;
+        self.clear();
+    }
+
+    fn init_chase_2(&mut self) {
+        self.led_mode = LedMode::Chase2;
         self.clear();
     }
 
@@ -98,7 +107,7 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
         else {
             self.tick_count = 0;
 
-            if self.one_in_chance(100) {
+            if self.one_in_chance(20) {
                 let random_key_index = self.rand_index(NUM_LEDS);
                 
                 if self.leds[random_key_index].r < 100 {
@@ -117,15 +126,14 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             }
 
             for led in self.leds.iter_mut() {
-                led.r = led.r.saturating_sub(1);
-                led.g = led.g.saturating_sub(1);
-                led.b = led.b.saturating_sub(1);
+                led.r = led.r.saturating_sub(2);
+                led.g = led.g.saturating_sub(2);
+                led.b = led.b.saturating_sub(2);
             }
         }
     }
 
     fn tick_chase(&mut self) {
-
         if self.tick_count < 10 {
             self.tick_count += 1;
             return;
@@ -136,6 +144,33 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
                 led.r = led.r.saturating_sub(1);
                 led.g = led.g.saturating_sub(1);
                 led.b = led.b.saturating_sub(1);
+            }
+        }
+    }
+
+    fn tick_chase_2(&mut self) {
+        if self.tick_count < 100 {
+            self.tick_count += 1;
+            return;
+        }
+        else {
+            self.tick_count = 0;
+
+            self.chase_count += 1;
+            if self.chase_count >= NUM_LEDS {
+                self.chase_count = 0;
+            }
+
+            let chase_2 = (self.chase_count + NUM_LEDS / 2) % NUM_LEDS;
+
+            self.wheel_positions[0] = self.wheel_positions[0].wrapping_add(10);
+            self.leds[self.chase_count] = Self::wheel_rgb(self.wheel_positions[0]);
+            self.leds[chase_2] = Self::wheel_rgb(self.wheel_positions[0]);
+            
+            for led in self.leds.iter_mut() {
+                led.r = led.r.saturating_sub(20);
+                led.g = led.g.saturating_sub(20);
+                led.b = led.b.saturating_sub(20);
             }
         }
     }
@@ -156,13 +191,13 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
     }
 
     fn handle_keypress_chase(&mut self) {
-        self.chase_cnt += 1;
-        if self.chase_cnt >= NUM_LEDS {
-            self.chase_cnt = 0;
+        self.chase_count += 1;
+        if self.chase_count >= NUM_LEDS {
+            self.chase_count = 0;
         }
 
         self.wheel_positions[0] = self.wheel_positions[0].wrapping_add(10);
-        self.leds[self.chase_cnt] = Self::wheel_rgb(self.wheel_positions[0])
+        self.leds[self.chase_count] = Self::wheel_rgb(self.wheel_positions[0])
     }
 
     pub fn handle_keypress(&mut self) {
@@ -199,6 +234,7 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             LedMode::Rainbow => self.tick_rainbow(),
             LedMode::Lightning => self.tick_lightning(),
             LedMode::Chase => self.tick_chase(),
+            LedMode::Chase2 => self.tick_chase_2(),
         }
     }
 
