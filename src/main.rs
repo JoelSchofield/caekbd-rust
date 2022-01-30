@@ -315,9 +315,11 @@ mod app {
         }
 
         let mut media_report = MediaKeyHidReport::default();
-
+        
         let kb_report: KbHidReport = c.shared.layout.lock(|l| {
             // Create a media report from the layout keycodes. Note only one media key will be processed at a time.
+            // TODO: Improve this. Should only update based on existing media_report state
+            // As only one media key should be active at once.
             for item in l.keycodes() {
                 if item == key_code::KeyCode::MediaVolUp {
                     media_report = MediaKeyHidReport::from(&MediaKey::VolUp);
