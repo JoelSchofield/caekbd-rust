@@ -13,9 +13,7 @@
 //! yourself then.
 
 use cortex_m;
-use embedded_time::{
-    fixed_point::FixedPoint,
-};
+use embedded_time::fixed_point::FixedPoint;
 use rp_pico::hal::{
     gpio::{Function, FunctionConfig, Pin, PinId, ValidPinMode},
     pio::{PIOExt, StateMachineIndex, Tx, UninitStateMachine, PIO},

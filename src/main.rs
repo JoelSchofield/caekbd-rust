@@ -3,53 +3,53 @@
 
 use panic_halt as _;
 
-mod ws2812_pio;
-mod slow_matrix;
-mod led_state;
-mod keyboard;
 mod display;
+mod keyboard;
+mod led_state;
+mod slow_matrix;
+mod ws2812_pio;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
+    use crate::display::CaeDisplay;
+    use crate::keyboard::{KbHidReport, MediaKey, MediaKeyHidReport, MediaKeyboard};
+    use crate::led_state::{LedMode, LedState};
+    use crate::slow_matrix::SlowMatrix;
+    use crate::ws2812_pio::Ws2812Direct;
     use cortex_m::prelude::_embedded_hal_watchdog_Watchdog;
     use cortex_m::prelude::_embedded_hal_watchdog_WatchdogEnable;
-    use keyberon::hid;
-    use keyberon::layout::CustomEvent;
-    use rp_pico::{
-        XOSC_CRYSTAL_FREQ,
-        hal::{
-            self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock, rosc,
-            pio::{PIOExt, SM0},
-            gpio::pin::bank0::Gpio13,
-            I2C
-        }
-    };
-    use rp_pico::pac::{
-        PIO0,
-        I2C0
-    };
     use embedded_time::duration::units::*;
+    use embedded_time::rate::Extensions;
+    use keyberon::action::Action;
+    use keyberon::debounce::Debouncer;
+    use keyberon::hid;
+    use keyberon::key_code;
+    use keyberon::layout::CustomEvent;
+    use keyberon::layout::Layout;
+    use keyberon::matrix::PressedKeys;
     use rp_pico::hal::gpio::DynPin;
     use rp_pico::hal::usb::UsbBus;
-    use embedded_time::rate::Extensions;
-    use keyberon::debounce::Debouncer;
-    use keyberon::key_code;
-    use keyberon::layout::Layout;
-    use keyberon::action::Action;
-    use keyberon::matrix::PressedKeys;
-    use usb_device::class_prelude::*;
+    use rp_pico::pac::{I2C0, PIO0};
+    use rp_pico::{
+        hal::{
+            self,
+            clocks::init_clocks_and_plls,
+            gpio::pin::bank0::Gpio13,
+            pio::{PIOExt, SM0},
+            rosc,
+            watchdog::Watchdog,
+            Clock, Sio, I2C,
+        },
+        XOSC_CRYSTAL_FREQ,
+    };
     use smart_leds::SmartLedsWrite;
-    use crate::ws2812_pio::Ws2812Direct;
-    use crate::slow_matrix::SlowMatrix;
-    use crate::led_state::{LedState, LedMode};
-    use crate::keyboard::{MediaKeyHidReport, MediaKey, KbHidReport, MediaKeyboard};
-    use crate::display::CaeDisplay;
+    use usb_device::class_prelude::*;
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
     const NUM_COLUMNS: usize = 16;
     const NUM_ROWS: usize = 5;
-    
+
     static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<rp_pico::hal::usb::UsbBus>> = None;
 
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -58,14 +58,19 @@ mod app {
         SetModeLightning,
         SetModeChase,
         SetModeChase2,
-        RestartToUf2
+        RestartToUf2,
     }
 
-    const ACTION_SET_MODE_RAINBOW: Action<CustomActions> = Action::Custom(CustomActions::SetModeRainbow);
-    const ACTION_SET_MODE_LIGHTNING: Action<CustomActions> = Action::Custom(CustomActions::SetModeLightning);
-    const ACTION_SET_MODE_CHASE: Action<CustomActions> = Action::Custom(CustomActions::SetModeChase);
-    const ACTION_SET_MODE_CHASE_2: Action<CustomActions> = Action::Custom(CustomActions::SetModeChase2);
-    const ACTION_RESTART_TO_UF2: Action<CustomActions> = Action::Custom(CustomActions::RestartToUf2);
+    const ACTION_SET_MODE_RAINBOW: Action<CustomActions> =
+        Action::Custom(CustomActions::SetModeRainbow);
+    const ACTION_SET_MODE_LIGHTNING: Action<CustomActions> =
+        Action::Custom(CustomActions::SetModeLightning);
+    const ACTION_SET_MODE_CHASE: Action<CustomActions> =
+        Action::Custom(CustomActions::SetModeChase);
+    const ACTION_SET_MODE_CHASE_2: Action<CustomActions> =
+        Action::Custom(CustomActions::SetModeChase2);
+    const ACTION_RESTART_TO_UF2: Action<CustomActions> =
+        Action::Custom(CustomActions::RestartToUf2);
 
     #[rustfmt::skip]
     pub static LAYERS: keyberon::layout::Layers<CustomActions> = keyberon::layout::layout! {
@@ -114,7 +119,7 @@ mod app {
         led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
         #[lock_free]
         led_state: LedState<rosc::RingOscillator<rosc::Enabled>, NUM_LEDS>,
-        display: CaeDisplay<I2C<I2C0, (DynPin, DynPin)>>
+        display: CaeDisplay<I2C<I2C0, (DynPin, DynPin)>>,
     }
 
     #[local]
@@ -202,7 +207,7 @@ mod app {
         let gpio_row2 = pins.gpio21;
         let gpio_row3 = pins.gpio22;
         let gpio_row4 = pins.gpio26;
-        
+
         // delay for power on
         for _ in 0..1000 {
             cortex_m::asm::nop();
@@ -219,40 +224,42 @@ mod app {
 
         let led_state: LedState<rosc::RingOscillator<rosc::Enabled>, NUM_LEDS> = LedState::new(rng);
 
-        let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> = cortex_m::interrupt::free(move |_cs| {
-            SlowMatrix::new(
-                [
-                    gpio_col0.into_pull_up_input().into(),
-                    gpio_col1.into_pull_up_input().into(),
-                    gpio_col2.into_pull_up_input().into(),
-                    gpio_col3.into_pull_up_input().into(),
-                    gpio_col4.into_pull_up_input().into(),
-                    gpio_col5.into_pull_up_input().into(),
-                    gpio_col6.into_pull_up_input().into(),
-                    gpio_col7.into_pull_up_input().into(),
-                    gpio_col8.into_pull_up_input().into(),
-                    gpio_col9.into_pull_up_input().into(),
-                    gpio_col10.into_pull_up_input().into(),
-                    gpio_col11.into_pull_up_input().into(),
-                    gpio_col12.into_pull_up_input().into(),
-                    gpio_col13.into_pull_up_input().into(),
-                    gpio_col14.into_pull_up_input().into(),
-                    gpio_col15.into_pull_up_input().into(),
-                ],
-                [
-                    gpio_row0.into_push_pull_output().into(),
-                    gpio_row1.into_push_pull_output().into(),
-                    gpio_row2.into_push_pull_output().into(),
-                    gpio_row3.into_push_pull_output().into(),
-                    gpio_row4.into_push_pull_output().into()
-                ],
-            )
-        })
-        .unwrap();
+        let matrix: SlowMatrix<DynPin, DynPin, NUM_COLUMNS, NUM_ROWS> =
+            cortex_m::interrupt::free(move |_cs| {
+                SlowMatrix::new(
+                    [
+                        gpio_col0.into_pull_up_input().into(),
+                        gpio_col1.into_pull_up_input().into(),
+                        gpio_col2.into_pull_up_input().into(),
+                        gpio_col3.into_pull_up_input().into(),
+                        gpio_col4.into_pull_up_input().into(),
+                        gpio_col5.into_pull_up_input().into(),
+                        gpio_col6.into_pull_up_input().into(),
+                        gpio_col7.into_pull_up_input().into(),
+                        gpio_col8.into_pull_up_input().into(),
+                        gpio_col9.into_pull_up_input().into(),
+                        gpio_col10.into_pull_up_input().into(),
+                        gpio_col11.into_pull_up_input().into(),
+                        gpio_col12.into_pull_up_input().into(),
+                        gpio_col13.into_pull_up_input().into(),
+                        gpio_col14.into_pull_up_input().into(),
+                        gpio_col15.into_pull_up_input().into(),
+                    ],
+                    [
+                        gpio_row0.into_push_pull_output().into(),
+                        gpio_row1.into_push_pull_output().into(),
+                        gpio_row2.into_push_pull_output().into(),
+                        gpio_row3.into_push_pull_output().into(),
+                        gpio_row4.into_push_pull_output().into(),
+                    ],
+                )
+            })
+            .unwrap();
 
         let layout = Layout::new(LAYERS);
-        let debouncer: keyberon::debounce::Debouncer<keyberon::matrix::PressedKeys<NUM_COLUMNS, NUM_ROWS>> =
-            Debouncer::new(PressedKeys::default(), PressedKeys::default(), 10);
+        let debouncer: keyberon::debounce::Debouncer<
+            keyberon::matrix::PressedKeys<NUM_COLUMNS, NUM_ROWS>,
+        > = Debouncer::new(PressedKeys::default(), PressedKeys::default(), 10);
 
         let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
         let mut alarm = timer.alarm_0().unwrap();
@@ -270,7 +277,9 @@ mod app {
             USB_BUS = Some(usb_bus);
         }
         //let usb_class = keyberon::new_class(unsafe { USB_BUS.as_ref().unwrap() }, ());
-        let usb_class = hid::HidClass::new(MediaKeyboard::default(), unsafe { USB_BUS.as_ref().unwrap() });
+        let usb_class = hid::HidClass::new(MediaKeyboard::default(), unsafe {
+            USB_BUS.as_ref().unwrap()
+        });
         let usb_dev = keyberon::new_device(unsafe { USB_BUS.as_ref().unwrap() });
 
         // Start watchdog and feed it with the lowest priority task at 1000hz
@@ -288,7 +297,7 @@ mod app {
                 debouncer,
                 led_driver,
                 led_state,
-                display
+                display,
             },
             Local {},
             init::Monotonics(),
@@ -322,11 +331,7 @@ mod app {
         });
 
         c.shared.watchdog.feed();
-        for event in c
-            .shared
-            .debouncer
-            .events(c.shared.matrix.get().unwrap())
-        {
+        for event in c.shared.debouncer.events(c.shared.matrix.get().unwrap()) {
             if event.is_press() {
                 c.shared.led_state.handle_keypress();
             }
@@ -340,21 +345,25 @@ mod app {
 
             match custom_action {
                 CustomEvent::Press(CustomActions::SetModeRainbow) => mode = Some(LedMode::Rainbow),
-                CustomEvent::Press(CustomActions::SetModeLightning) => mode = Some(LedMode::Lightning),
+                CustomEvent::Press(CustomActions::SetModeLightning) => {
+                    mode = Some(LedMode::Lightning)
+                }
                 CustomEvent::Press(CustomActions::SetModeChase) => mode = Some(LedMode::Chase),
                 CustomEvent::Press(CustomActions::SetModeChase2) => mode = Some(LedMode::Chase2),
-                CustomEvent::Press(CustomActions::RestartToUf2) => hal::rom_data::reset_to_usb_boot(0, 0),
+                CustomEvent::Press(CustomActions::RestartToUf2) => {
+                    hal::rom_data::reset_to_usb_boot(0, 0)
+                }
                 _ => (),
             }
         });
 
         match mode {
             Some(x) => c.shared.led_state.set_mode(x),
-            None => ()
+            None => (),
         }
 
         let mut media_report = MediaKeyHidReport::default();
-        
+
         let kb_report: KbHidReport = c.shared.layout.lock(|l| {
             // Create a media report from the layout keycodes. Note only one media key will be processed at a time.
             // TODO: Improve this. Should only update based on existing media_report state
@@ -363,12 +372,10 @@ mod app {
                 if item == key_code::KeyCode::MediaVolUp {
                     media_report = MediaKeyHidReport::from(&MediaKey::VolUp);
                     break;
-                }
-                else if item == key_code::KeyCode::MediaVolDown {
+                } else if item == key_code::KeyCode::MediaVolDown {
                     media_report = MediaKeyHidReport::from(&MediaKey::VolDown);
                     break;
-                }
-                else if item == key_code::KeyCode::MediaPlayPause {
+                } else if item == key_code::KeyCode::MediaPlayPause {
                     media_report = MediaKeyHidReport::from(&MediaKey::PlayPause);
                     break;
                 }
@@ -379,16 +386,26 @@ mod app {
 
         // Send media key report, assembled from keycodes from out layout. Note media keys must be processed separate to
         // normal keycodes.
-        if c.shared.usb_class.lock(|k| k.device_mut().set_media_report(media_report.clone())) {
+        if c.shared
+            .usb_class
+            .lock(|k| k.device_mut().set_media_report(media_report.clone()))
+        {
             c.shared.led_state.handle_keypress();
-            while let Ok(0) = c.shared.usb_class.lock(|k| k.write(media_report.as_bytes())) {}
+            while let Ok(0) = c
+                .shared
+                .usb_class
+                .lock(|k| k.write(media_report.as_bytes()))
+            {}
         }
 
         // Send ordinary keyboard report
-        if c.shared.usb_class.lock(|k| k.device_mut().set_keyboard_report(kb_report.clone())) {
+        if c.shared
+            .usb_class
+            .lock(|k| k.device_mut().set_keyboard_report(kb_report.clone()))
+        {
             while let Ok(0) = c.shared.usb_class.lock(|k| k.write(kb_report.as_bytes())) {}
         }
-        
+
         // Update led states
         c.shared.led_state.tick();
         let data = c.shared.led_state.get_grb();
