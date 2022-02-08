@@ -8,12 +8,16 @@ use embedded_graphics::{
 use ssd1306::{mode::BufferedGraphicsMode, prelude::*, Ssd1306};
 use tinybmp::Bmp;
 
-const BONGO_1: &[u8] = include_bytes!("../images/bongo_1.bmp");
-const BONGO_2: &[u8] = include_bytes!("../images/bongo_2.bmp");
-const BONGO_3: &[u8] = include_bytes!("../images/bongo_3.bmp");
+const BONGO_IDLE: &[u8] = include_bytes!("../images/bongo_1.bmp");
+const BONGO_TAP_1: &[u8] = include_bytes!("../images/bongo_2.bmp");
+const BONGO_TAP_2: &[u8] = include_bytes!("../images/bongo_3.bmp");
+const BONGO_TAP: [&[u8]; 2] = [include_bytes!("../images/bongo_2.bmp"),  include_bytes!("../images/bongo_3.bmp")];
 
 pub struct CaeDisplay<I> {
     display: Ssd1306<I2CInterface<I>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>,
+    bongo_cnt: usize,
+    last_keypress: u32,
+    tick_cnt: u32
 }
 
 impl<I> CaeDisplay<I>
@@ -33,16 +37,51 @@ where
             .into_buffered_graphics_mode();
         display.init().unwrap();
 
-        Self { display }
+        let mut display = Self { 
+            display,
+            bongo_cnt: 0,
+            last_keypress: 0,
+            tick_cnt: 0
+        };
+        
+        display.draw_image(BONGO_IDLE);
+
+        return display;
     }
 
-    pub fn test_draw(&mut self) {
+    fn draw_image(&mut self, bytes: &[u8]) {
         self.display.clear();
-        let bmp = Bmp::<BinaryColor>::from_slice(BONGO_1).unwrap();
+        let bmp = Bmp::<BinaryColor>::from_slice(bytes).unwrap();
         Image::new(&bmp, Point::new(0, 0))
             .draw(&mut self.display)
             .unwrap();
         self.display.flush().unwrap();
+    }
+
+    pub fn handle_keypress(&mut self) {
+        match self.bongo_cnt {
+            0 => self.draw_image(BONGO_TAP_1),
+            _ => self.draw_image(BONGO_TAP_2)
+        };
+
+        self.last_keypress = self.tick_cnt;
+
+        // There must be some better way to do this with iterators, however I couldnt
+        // find a way to store an iterator in the struct; the typing looks overcomplicated
+        // for something that should be simple..
+        self.bongo_cnt += 1;
+        if self.bongo_cnt >= BONGO_TAP.len() {
+            self.bongo_cnt = 0;
+        }
+    }
+
+    // TODO: Fix this crap to use a proper SM and real timing
+    pub fn tick(&mut self) {
+        self.tick_cnt += 1;
+        
+        if (self.last_keypress + 400) == self.tick_cnt {
+            self.draw_image(BONGO_IDLE);
+        }
     }
 
     pub fn _test_draw_text(&mut self) {

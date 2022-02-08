@@ -35,6 +35,10 @@ mod app {
             self,
             clocks::init_clocks_and_plls,
             gpio::pin::bank0::Gpio13,
+            gpio::pin::bank0::Gpio4,
+            gpio::pin::bank0::Gpio5,
+            gpio::Pin,
+            gpio::FunctionI2C,
             pio::{PIOExt, SM0},
             rosc,
             watchdog::Watchdog,
@@ -119,7 +123,8 @@ mod app {
         led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
         #[lock_free]
         led_state: LedState<rosc::RingOscillator<rosc::Enabled>, NUM_LEDS>,
-        display: CaeDisplay<I2C<I2C0, (DynPin, DynPin)>>,
+        #[lock_free]
+        display: CaeDisplay<I2C<I2C0, (Pin<Gpio4, FunctionI2C>, Pin<Gpio5, FunctionI2C>)>>
     }
 
     #[local]
@@ -150,17 +155,11 @@ mod app {
             &mut resets,
         );
 
-        // # Use for I2C, use the max frequency possible
-        // i2c = I2C(scl=board.GP5, sda=board.GP4, frequency=1000000)
-
-        // # setup the I2C display, its an ssd1306 display
-        // display_bus = displayio.I2CDisplay(i2c, device_address=0x3C)
-        // display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=display_width, height=display_height, auto_refresh=False)
-
         // Configure two pins as being I²C, not GPIO
         let sda_pin = pins.gpio4.into_mode::<hal::gpio::FunctionI2C>();
         let scl_pin = pins.gpio5.into_mode::<hal::gpio::FunctionI2C>();
 
+        // Note: Daves impl uses a freq of 1MHz.
         // Create the I²C driver, using the two pre-configured pins. This will fail
         // at compile time if the pins are in the wrong mode, or if this I²C
         // peripheral isn't available on these pins!
@@ -174,7 +173,7 @@ mod app {
         );
 
         let mut display = CaeDisplay::new(i2c);
-        display.test_draw();
+        display.handle_keypress();
 
         let rng = rosc::RingOscillator::new(c.device.ROSC).initialize();
 
@@ -283,7 +282,7 @@ mod app {
         let usb_dev = keyberon::new_device(unsafe { USB_BUS.as_ref().unwrap() });
 
         // Start watchdog and feed it with the lowest priority task at 1000hz
-        watchdog.start(10_000.microseconds());
+        watchdog.start(1_000_000.microseconds());
 
         (
             Shared {
@@ -320,7 +319,7 @@ mod app {
     #[task(
         binds = TIMER_IRQ_0,
         priority = 1,
-        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, led_state],
+        shared = [matrix, debouncer, watchdog, timer, alarm, layout, usb_class, led_driver, led_state, display],
     )]
     fn scan_timer_irq(mut c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
@@ -334,6 +333,7 @@ mod app {
         for event in c.shared.debouncer.events(c.shared.matrix.get().unwrap()) {
             if event.is_press() {
                 c.shared.led_state.handle_keypress();
+                c.shared.display.handle_keypress();
             }
             c.shared.layout.lock(|l| l.event(event));
         }
@@ -405,6 +405,9 @@ mod app {
         {
             while let Ok(0) = c.shared.usb_class.lock(|k| k.write(kb_report.as_bytes())) {}
         }
+
+        // Update display
+        c.shared.display.tick();
 
         // Update led states
         c.shared.led_state.tick();
