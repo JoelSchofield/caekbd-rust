@@ -7,6 +7,7 @@ mod ws2812_pio;
 mod slow_matrix;
 mod led_state;
 mod keyboard;
+mod display;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
@@ -19,13 +20,18 @@ mod app {
         hal::{
             self, clocks::init_clocks_and_plls, watchdog::Watchdog, Sio, Clock, rosc,
             pio::{PIOExt, SM0},
-            gpio::pin::bank0::Gpio13
+            gpio::pin::bank0::Gpio13,
+            I2C
         }
     };
-    use rp_pico::pac::PIO0;
+    use rp_pico::pac::{
+        PIO0,
+        I2C0
+    };
     use embedded_time::duration::units::*;
     use rp_pico::hal::gpio::DynPin;
     use rp_pico::hal::usb::UsbBus;
+    use embedded_time::rate::Extensions;
     use keyberon::debounce::Debouncer;
     use keyberon::key_code;
     use keyberon::layout::Layout;
@@ -37,6 +43,7 @@ mod app {
     use crate::slow_matrix::SlowMatrix;
     use crate::led_state::{LedState, LedMode};
     use crate::keyboard::{MediaKeyHidReport, MediaKey, KbHidReport, MediaKeyboard};
+    use crate::display::CaeDisplay;
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
@@ -107,6 +114,7 @@ mod app {
         led_driver: Ws2812Direct<PIO0, SM0, Gpio13>,
         #[lock_free]
         led_state: LedState<rosc::RingOscillator<rosc::Enabled>, NUM_LEDS>,
+        display: CaeDisplay<I2C<I2C0, (DynPin, DynPin)>>
     }
 
     #[local]
@@ -114,6 +122,7 @@ mod app {
 
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
+        //let mut pac = pac::Peripherals::take().unwrap();
         let mut resets = c.device.RESETS;
         let mut watchdog = Watchdog::new(c.device.WATCHDOG);
         let clocks = init_clocks_and_plls(
@@ -135,6 +144,32 @@ mod app {
             sio.gpio_bank0,
             &mut resets,
         );
+
+        // # Use for I2C, use the max frequency possible
+        // i2c = I2C(scl=board.GP5, sda=board.GP4, frequency=1000000)
+
+        // # setup the I2C display, its an ssd1306 display
+        // display_bus = displayio.I2CDisplay(i2c, device_address=0x3C)
+        // display = adafruit_displayio_ssd1306.SSD1306(display_bus, width=display_width, height=display_height, auto_refresh=False)
+
+        // Configure two pins as being I²C, not GPIO
+        let sda_pin = pins.gpio4.into_mode::<hal::gpio::FunctionI2C>();
+        let scl_pin = pins.gpio5.into_mode::<hal::gpio::FunctionI2C>();
+
+        // Create the I²C driver, using the two pre-configured pins. This will fail
+        // at compile time if the pins are in the wrong mode, or if this I²C
+        // peripheral isn't available on these pins!
+        let i2c = hal::I2C::i2c0(
+            c.device.I2C0,
+            sda_pin,
+            scl_pin,
+            400.kHz(),
+            &mut resets,
+            clocks.peripheral_clock.freq(),
+        );
+
+        let mut display = CaeDisplay::new(i2c);
+        display.test_draw();
 
         let rng = rosc::RingOscillator::new(c.device.ROSC).initialize();
 
@@ -252,7 +287,8 @@ mod app {
                 layout,
                 debouncer,
                 led_driver,
-                led_state
+                led_state,
+                display
             },
             Local {},
             init::Monotonics(),
