@@ -8,6 +8,7 @@ mod keyboard;
 mod led_state;
 mod slow_matrix;
 mod ws2812_pio;
+mod clock;
 
 #[rtic::app(device = rp_pico::hal::pac, peripherals = true)]
 mod app {
@@ -16,6 +17,7 @@ mod app {
     use crate::led_state::{LedMode, LedState};
     use crate::slow_matrix::SlowMatrix;
     use crate::ws2812_pio::Ws2812Direct;
+    use crate::clock::PicoClock;
     use cortex_m::prelude::_embedded_hal_watchdog_Watchdog;
     use cortex_m::prelude::_embedded_hal_watchdog_WatchdogEnable;
     use embedded_time::duration::units::*;
@@ -48,6 +50,7 @@ mod app {
     };
     use smart_leds::SmartLedsWrite;
     use usb_device::class_prelude::*;
+    use embedded_time::clock::Clock as EmbClock;
 
     const SCAN_TIME_US: u32 = 1000;
     const NUM_LEDS: usize = 17;
@@ -90,7 +93,7 @@ mod app {
             [t {ACTION_SET_MODE_RAINBOW} {ACTION_SET_MODE_LIGHTNING} {ACTION_SET_MODE_CHASE} {ACTION_SET_MODE_CHASE_2} t t t t t t t t t t {ACTION_RESTART_TO_UF2} ]
             [t t t t t t t t t t t t t t t t ]
             [t t t t t t t t t t t t t t t MediaVolUp ]
-            [t t t t t t t t t t t t t Up t MediaVolDown ]
+            [t t t t t t t t t MediaPreviousSong MediaNextSong t t Up t MediaVolDown ]
             [t t t t t t MediaPlayPause t t t t Left t Down Right n ]
         }
         {
@@ -146,7 +149,7 @@ mod app {
         )
         .ok()
         .unwrap();
-
+        
         let sio = Sio::new(c.device.SIO);
         let pins = hal::gpio::Pins::new(
             c.device.IO_BANK0,
@@ -261,6 +264,10 @@ mod app {
         > = Debouncer::new(PressedKeys::default(), PressedKeys::default(), 10);
 
         let mut timer = hal::Timer::new(c.device.TIMER, &mut resets);
+        let y = PicoClock::new(&timer);
+
+        let timestamp = y.try_now().unwrap();
+
         let mut alarm = timer.alarm_0().unwrap();
         let _ = alarm.schedule(SCAN_TIME_US.microseconds());
         alarm.enable_interrupt(&mut timer);
@@ -378,7 +385,14 @@ mod app {
                 } else if item == key_code::KeyCode::MediaPlayPause {
                     media_report = MediaKeyHidReport::from(&MediaKey::PlayPause);
                     break;
+                } else if item == key_code::KeyCode::MediaNextSong {
+                    media_report = MediaKeyHidReport::from(&MediaKey::NextTrack);
+                    break;
+                } else if item == key_code::KeyCode::MediaPreviousSong {
+                    media_report = MediaKeyHidReport::from(&MediaKey::PrevTrack);
+                    break;
                 }
+                
             }
 
             l.keycodes().collect()
