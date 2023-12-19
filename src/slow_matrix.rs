@@ -58,8 +58,8 @@ where
                 }
             }
             row.set_high()?;
-            // Add delay into original matrix.rs impl, allowing each row enough 
-            // time to return to high before checking next row (avoiding false 
+            // Add delay into original matrix.rs impl, allowing each row enough
+            // time to return to high before checking next row (avoiding false
             // keypresses).
             cortex_m::asm::delay(100);
         }
