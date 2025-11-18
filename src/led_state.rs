@@ -7,6 +7,7 @@ pub enum LedMode {
     Lightning,
     Chase,
     Chase2,
+    Off
 }
 
 pub struct LedState<R: RngCore, const NUM_LEDS: usize> {
@@ -29,7 +30,7 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             rng,
         };
 
-        ret.set_mode(LedMode::Chase2);
+        ret.set_mode(LedMode::Off);
         return ret;
     }
 
@@ -55,6 +56,9 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             LedMode::Chase2 => {
                 self.init_chase_2();
             }
+            LedMode::Off => {
+                self.init_off();
+            }
         }
     }
 
@@ -66,6 +70,11 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
         for (i, wheel_pos) in self.wheel_positions.iter_mut().enumerate() {
             *wheel_pos = (i as f32 * step) as u8;
         }
+    }
+
+    fn init_off(&mut self) {
+        self.led_mode = LedMode::Off;
+        self.clear();
     }
 
     fn init_lightning(&mut self) {
@@ -168,6 +177,10 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
         }
     }
 
+    fn tick_off(&mut self) {
+        return;
+    }
+
     fn handle_keypress_lightning(&mut self) {
         let random_key_index = self.rand_index(NUM_LEDS);
 
@@ -225,6 +238,7 @@ impl<R: RngCore, const NUM_LEDS: usize> LedState<R, NUM_LEDS> {
             LedMode::Lightning => self.tick_lightning(),
             LedMode::Chase => self.tick_chase(),
             LedMode::Chase2 => self.tick_chase_2(),
+            LedMode::Off => self.tick_off(),
         }
     }
 
